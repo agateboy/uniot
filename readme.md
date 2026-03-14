@@ -1,182 +1,172 @@
-IoT Monitoring & Control Dashboard (Skripsi)
-Proyek ini adalah platform IoT berbasis web yang memungkinkan pengguna untuk memantau data sensor dan mengontrol aktuator secara real-time. Sistem ini dibangun menggunakan Node.js (Backend), SQLite (Database), dan HTML/JS Native (Frontend).
+# IoT Monitoring Dashboard (Operator Guide)
 
-📋 Prasyarat (System Requirements)
-Sebelum memulai, pastikan laptop/server Anda (Lubuntu/Ubuntu) sudah terinstall paket berikut:
+Dokumen ini ditujukan untuk operator: mulai dari install Node.js sampai aplikasi bisa diakses dari perangkat lain melalui IP dan port.
 
-Node.js & NPM (Runtime JavaScript)
+## 1. Ringkasan
 
+- Backend: Node.js + Express + Socket.IO
+- Database: SQLite (file `database.sqlite`, otomatis dibuat/dipakai aplikasi)
+- Frontend: file HTML statis yang disajikan langsung oleh server Node.js
 
+Tidak perlu setup MySQL.
 
-Git (Version Control)
+## 2. Prasyarat
 
-Jika belum, jalankan perintah ini di terminal:
+- Node.js LTS (disarankan versi 18 ke atas)
+- NPM (biasanya sudah ikut dengan Node.js)
+- Git (opsional, jika ambil source dari repository)
+- Windows: disarankan bisa buka PowerShell as Administrator (untuk auto-rule firewall)
+
+## 3. Install Node.js
+
+### Windows
+
+1. Install Node.js LTS dari situs resmi.
+2. Cek berhasil atau belum:
+
+```powershell
+node -v
+npm -v
+```
+
+### Ubuntu/Lubuntu
 
 ```bash
 sudo apt update
-sudo apt install nodejs npm git -y
+sudo apt install -y nodejs npm git
+node -v
+npm -v
 ```
 
-🚀 Langkah Instalasi (Dari Awal)
-Ikuti langkah-langkah ini secara berurutan.
+## 4. Ambil Kode dan Install Dependency
 
-Ambil kode program dari GitHub ke komputer lokal Anda.
+Jika dari git:
 
 ```bash
-cd ~/Documents
-git clone https://github.com/agateboy/skripsi.git
+git clone <URL_REPOSITORY_KAMU>
 cd skripsi
+npm install
 ```
 
-IoT Monitoring & Control Dashboard
-
-Deskripsi
-Proyek ini adalah platform IoT berbasis web untuk memantau data sensor dan mengontrol aktuator secara real-time. Backend dibuat dengan Node.js, database menggunakan SQLite, dan frontend berupa file HTML/JavaScript statis.
-
-Prasyarat
-- **Node.js & NPM:** runtime JavaScript
-- **Git:** version control
-
-Jika belum terpasang (Ubuntu/Lubuntu), jalankan:
-
-```bash
-sudo apt update
-sudo apt install nodejs npm mysql-server git -y
-```
-
-Instalasi (Singkat)
-1. Clone repository:
-
-```bash
-cd ~/Documents
-git clone https://github.com/agateboy/skripsi.git
-cd skripsi
-```
-
-2. Install dependencies backend:
+Jika project sudah ada di folder lokal, cukup masuk ke folder project lalu:
 
 ```bash
 npm install
 ```
 
-Setup Database (MySQL)
-Masuk ke MySQL sebagai root lalu jalankan perintah SQL berikut.
-
-```sql
--- 1. Buat database
-CREATE DATABASE IF NOT EXISTS skripsi_iot_db;
-
--- 2. Buat user (samakan dengan konfigurasi di index.js)
-CREATE USER IF NOT EXISTS 'agate'@'localhost' IDENTIFIED WITH mysql_native_password BY '1@#$Ajasaru';
-GRANT ALL PRIVILEGES ON skripsi_iot_db.* TO 'agate'@'localhost';
-FLUSH PRIVILEGES;
-
--- 3. Gunakan database
-USE skripsi_iot_db;
-
--- 4. Tabel users
-CREATE TABLE IF NOT EXISTS users (
-    user_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 5. Tabel devices
-CREATE TABLE IF NOT EXISTS devices (
-    device_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    device_name VARCHAR(100) NOT NULL,
-    api_key VARCHAR(255) NOT NULL UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-);
-
--- 6. Tabel sensor_data
-CREATE TABLE IF NOT EXISTS sensor_data (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    device_id INT NOT NULL,
-    sensor_type VARCHAR(50) NOT NULL,
-    value VARCHAR(255) NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
--- 7. Tabel widgets
-CREATE TABLE IF NOT EXISTS widgets (
-    widget_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    device_id INT NOT NULL,
-    sensor_type VARCHAR(50) NOT NULL,
-    widget_type ENUM('graph','gauge','toggle') NOT NULL,
-    data_type ENUM('float','integer','boolean') NOT NULL,
-    current_value VARCHAR(255) DEFAULT 'false',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-ALTER TABLE devices ADD COLUMN public_slug VARCHAR(100) UNIQUE DEFAULT NULL;
-ALTER TABLE `widgets` MODIFY COLUMN `widget_type` ENUM('graph', 'gauge', 'toggle', 'slider') NOT NULL;
-);
-
--- Keluar
-EXIT;
-```
-
-Catatan konfigurasi IP
-- Tidak perlu ubah IP manual di file HTML.
-- Saat menjalankan `npm start`, skrip `prestart` otomatis membuat/memperbarui `.env` dengan `LOCAL_IP` sesuai IP lokal komputer.
-- Frontend sekarang memakai same-origin (`window.location.origin`), jadi API/WebSocket otomatis mengikuti alamat yang dipakai saat membuka aplikasi.
-
-Menjalankan Aplikasi
-- Jalankan dari folder proyek:
+## 5. Jalankan Aplikasi
 
 ```bash
 npm start
 ```
 
-- `npm start` akan:
-    1) Generate/update `.env` (`LOCAL_IP` dan `PORT`),
-    2) Menjalankan server Express + Socket.IO,
-    3) Menyajikan file HTML statis dari root proyek.
+Saat startup, sistem otomatis:
 
-- Akses UI di browser (contoh):
+1. Generate atau update file `.env`
+2. Mengisi `LOCAL_IP` sesuai interface jaringan aktif
+3. Mengisi `PORT` (default `3001`)
+4. Mencoba membuat rule firewall Windows untuk port aplikasi
+5. Menjalankan server Node.js
+
+Contoh log sukses:
+
+```text
+.env diperbarui. LOCAL_IP=192.168.x.x, PORT=3001
+Server (Express + Socket.IO) berjalan di http://localhost:3001
+Akses dari jaringan lokal: http://192.168.x.x:3001
+Successfully connected to database.sqlite!
+```
+
+## 6. Cara Akses
+
+### Dari server itu sendiri
 
 ```text
 http://localhost:3001/login.html
 ```
 
-- Untuk perangkat lain di jaringan, gunakan alamat yang muncul di log terminal:
+### Dari perangkat lain di jaringan yang sama
 
 ```text
 http://<LOCAL_IP>:3001/login.html
 ```
 
-Simulasi Data (tanpa ESP32)
-Kirim data palsu ke endpoint API untuk menguji real-time update (ganti `MASUKKAN_API_KEY_DISINI`):
+Contoh:
 
-```bash
-curl -X POST http://localhost:3001/api/data \
-    -H "Content-Type: application/json" \
-    -H "x-api-key: MASUKKAN_API_KEY_DISINI" \
-    -d '{"sensor_type":"suhu","value":28.5}'
+```text
+http://192.168.18.244:3001/login.html
 ```
 
-Troubleshooting (Masalah Umum)
-- Error `connect ECONNREFUSED ::1:3306`: MySQL mungkin mencoba koneksi IPv6. Pastikan pada `index.js` host MySQL diatur ke `127.0.0.1` bukan `localhost`.
-- Error `Client does not support authentication`: ubah plugin auth MySQL untuk user:
+## 7. Tentang File .env
 
-```sql
-ALTER USER 'agate'@'localhost' IDENTIFIED WITH mysql_native_password BY '1@#$Ajasaru';
+File `.env` dikelola otomatis saat `npm start`.
+Isi minimal:
+
+```env
+LOCAL_IP=192.168.x.x
+PORT=3001
 ```
-- Halaman web kosong / fetch gagal: pastikan backend (`node index.js`) berjalan tanpa error.
 
-Kontak & Catatan
-- File utama backend: `index.js`
-- File frontend: file HTML/JS di root proyek (`login.html`, `dashboard.html`, dll.)
+Kamu boleh ubah `PORT`, tetapi pastikan akses URL mengikuti port tersebut.
 
-Jika mau, saya bisa:
-- Menjalankan aplikasi dan memverifikasi koneksi (jika Anda ingin saya jalankan perintah), atau
-- Menambahkan contoh konfigurasi `env` bila `index.js` memakai variabel lingkungan.
+## 8. Troubleshooting Operator
 
-Terima kasih — semoga dokumentasi ini lebih mudah diikuti.
+### A. Error EADDRINUSE: port already in use
+
+Artinya port 3001 dipakai proses lain.
+
+Windows (PowerShell):
+
+```powershell
+Get-NetTCPConnection -LocalPort 3001 -State Listen
+```
+
+Lalu hentikan proses yang memakai port itu, atau ganti `PORT` di `.env`.
+
+### B. Bisa dibuka di localhost, tapi tidak bisa dari perangkat lain
+
+Checklist:
+
+1. Pastikan perangkat klien dan server ada di subnet yang sama.
+2. Pastikan URL yang dipakai adalah `http://<LOCAL_IP>:3001/login.html`.
+3. Pastikan firewall rule ada:
+
+```powershell
+netsh advfirewall firewall show rule name="Skripsi Node 3001"
+```
+
+4. Jika rule belum ada, jalankan PowerShell as Administrator lalu:
+
+```powershell
+node scripts/allow-firewall.js
+```
+
+5. Pastikan router/hotspot tidak mengaktifkan client isolation/AP isolation.
+
+### C. LOCAL_IP tidak sesuai interface aktif
+
+Regenerate env:
+
+```powershell
+node scripts/generate-env.js
+Get-Content .env
+```
+
+Lalu restart aplikasi:
+
+```powershell
+npm start
+```
+
+## 9. Struktur File Penting
+
+- `index.js`: server utama
+- `scripts/generate-env.js`: deteksi IP lokal dan update `.env`
+- `scripts/allow-firewall.js`: buka inbound firewall untuk port aplikasi
+- `.env`: konfigurasi runtime lokal (otomatis)
+
+## 10. Catatan Operasional
+
+- Untuk akses lokal jaringan, cukup jalankan `npm start` pada komputer server.
+- Jika pindah jaringan, jalankan ulang `npm start` agar `LOCAL_IP` diperbarui otomatis.
+- Untuk domain publik (mis. tanpa IP), butuh DNS + router + reverse proxy, tidak cukup npm saja.
