@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Dashboard Kustom Saya</title>
+    <title>Dashboard UNIOTya</title>
     <style>
         body {
             font-family: sans-serif;
@@ -321,7 +321,6 @@
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 
 <body>
@@ -333,14 +332,13 @@
             <h2>Manajemen Perangkat</h2>
             <form id="deviceForm">
                 <label for="device_name">Nama Perangkat Baru:</label>
-                <input type="text" id="device_name" placeholder="Misal: Sensor Kamar" required>
+                <input type="text" id="device_name" placeholder="Contoh: sensor_ruangan1" required>
                 <button type="submit">Tambahkan Perangkat</button>
             </form>
-            <div id="apiKeyResult" style="display:none; margin-top: 15px;">
-                <h4>Perangkat Berhasil Didaftar!</h4>
-                <p>Salin API Key ini ke ESP32 Anda (Hanya muncul sekali, harap disimpan!):</p>
-                <code id="newApiKey"
-                    style="background: #eee; padding: 5px; border-radius: 4px; display: block; word-wrap: break-word;"></code>
+            <div id="deviceSuccessResult" style="display:none; margin-top: 15px; padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+                <h4>✓ Perangkat Berhasil Ditambahkan!</h4>
+                <p>Nama perangkat: <code id="newDeviceName" style="background: #fff; padding: 2px 5px; border-radius: 3px;"></code></p>
+                <p style="font-size: 0.9em; margin: 5px 0 0 0;">Konfigurasikan ESP32 dengan nama yang sama untuk terhubung.</p>
             </div>
         </div>
         <div class="manager-container" id="deviceListContainer">
@@ -360,7 +358,7 @@
             <option value="">-- Pilih Perangkat --</option>
         </select>
         <button id="showWidgetFormButton" style="display: none;">+ Tambah Variabel</button>
-        <button id="shareDeviceButton" style="background-color: #6f42c1; margin-left: 10px;">🔗 Share Link</button>
+        <button id="shareDeviceButton" style="background-color: #6f42c1; margin-left: 10px;">Share Link</button>
 
         <div id="widgetFormContainer" style="display: none;">
             <h3 id="widgetFormTitle">Tambah Variabel Baru untuk...</h3>
@@ -375,7 +373,7 @@
                         <option value="graph">Graph (Line Chart)</option>
                         <option value="gauge">Gauge (Meteran)</option>
                         <option value="number">Number (Angka)</option>
-                        <option value="toggle">Toggle (On/Off)</option>
+                        <option value="toggle">Toggle (True/False)</option>
                         <option value="slider">Slider (PWM)</option>
                     </select>
                 </div>
@@ -384,7 +382,7 @@
                     <select id="dataType" required>
                         <option value="float">Float (Desimal)</option>
                         <option value="integer">Integer (Bulat)</option>
-                        <option value="boolean">Boolean (On/Off)</option>
+                        <option value="boolean">Boolean (True/False)</option>
                     </select>
                 </div>
                 <button type="submit">Simpan Widget</button>
@@ -403,11 +401,11 @@
                     const dataTypeSelect = document.getElementById('dataType');
                     widgetTypeSelect.addEventListener('change', function() {
                         if (this.value === 'toggle') {
-                            dataTypeSelect.innerHTML = '<option value="boolean">Boolean (On/Off)</option>';
+                            dataTypeSelect.innerHTML = '<option value="boolean">Boolean (True/False)</option>';
                         } else if (this.value === 'number') {
                             dataTypeSelect.innerHTML = '<option value="float">Float (Desimal)</option><option value="integer">Integer (Bulat)</option>';
                         } else {
-                            dataTypeSelect.innerHTML = '<option value="float">Float (Desimal)</option><option value="integer">Integer (Bulat)</option><option value="boolean">Boolean (On/Off)</option>';
+                            dataTypeSelect.innerHTML = '<option value="float">Float (Desimal)</option><option value="integer">Integer (Bulat)</option><option value="boolean">Boolean (True/False)</option>';
                         }
                     });
                 });
@@ -418,42 +416,67 @@
 
         const API_BASE = window.location.origin;
 
-        // --- Koneksi WebSocket ---
-        const socket = io(API_BASE, { auth: { token: token } });
-        socket.on('connect', () => console.log('Terhubung ke server real-time!', socket.id));
-        socket.on('disconnect', () => console.log('Koneksi real-time terputus.'));
-        socket.on('newData', (data) => {
-            console.log('Data baru diterima:', data);
-            allSensorData.push(data);
-            const selectedDeviceId = activeDeviceSelect.value;
-            if (data.device_id == selectedDeviceId) {
-                updateWidgetData(data);
-            }
-        });
-        socket.on('widgetStateUpdated', (data) => {
-            console.log('Status widget diperbarui:', data);
+        // --- Koneksi WebSocket Native ---
+        let ws = null;
 
-            // Update data lokal
-            const widgetIndex = allUserWidgets.findIndex(w => w.widget_id == data.widget_id);
-            if (widgetIndex > -1) {
-                allUserWidgets[widgetIndex].current_value = data.current_value;
-            }
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}?token=${encodeURIComponent(token)}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('✓ WebSocket terhubung ke server!');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 Data dari server:', data);
+                    
+                    // Jika format: {device, sensor_type, value, timestamp} → data dari ESP32
+                    if (data.device && data.sensor_type && data.value !== undefined) {
+                        // Cari device_id berdasarkan device_name untuk simpan di historikaldata
+                        const deviceObj = allUserDevices.find(d => d.device_name === data.device);
+                        
+                        const dataWithDeviceId = {
+                            device_id: deviceObj ? deviceObj.device_id : null,
+                            device_name: data.device,
+                            sensor_type: data.sensor_type,
+                            value: data.value,
+                            timestamp: data.timestamp
+                        };
+                        
+                        allSensorData.push(dataWithDeviceId);
+                        
+                        // Update widget jika device ini sedang dipilih
+                        const selectedDeviceName = activeDeviceSelect.value; // Ini adalah device_id dari SELECT
+                        if (selectedDeviceName) {
+                            const selectedDevice = allUserDevices.find(d => d.device_id == selectedDeviceName);
+                            if (selectedDevice && selectedDevice.device_name === data.device) {
+                                updateWidgetData(dataWithDeviceId);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('JSON parse error:', error);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                console.log('⚠️ WebSocket connection closed');
+                // Auto-reconnect dalam 3 detik
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
 
-            // 1. Update Toggle (Kode Lama)
-            const toggleInput = document.querySelector(`input.widget-toggle[data-widget-id="${data.widget_id}"]`);
-            if (toggleInput) {
-                toggleInput.checked = (data.current_value === 'true');
-            }
+        // Jangan tunggu DOMContentLoaded, langsung connect WebSocket
+        connectWebSocket();
 
-            // 2. Update Slider (TAMBAHAN BARU)
-            const sliderInput = document.querySelector(`input.widget-slider[data-widget-id="${data.widget_id}"]`);
-            if (sliderInput) {
-                sliderInput.value = data.current_value;
-                // Update teks angka juga
-                const display = document.getElementById(`val-display-${data.widget_id}`);
-                if (display) display.textContent = data.current_value;
-            }
-        });
 
         // --- Variabel Global & Element DOM ---
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -813,14 +836,14 @@
             document.getElementById('deviceForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const deviceName = document.getElementById('device_name').value;
-                const apiKeyResult = document.getElementById('apiKeyResult');
-                const newApiKey = document.getElementById('newApiKey');
+                const deviceSuccessResult = document.getElementById('deviceSuccessResult');
+                const newDeviceName = document.getElementById('newDeviceName');
                 try {
                     const data = await fetchWithAuth(`${API_BASE}/api/devices`, {
                         method: 'POST', body: JSON.stringify({ device_name: deviceName })
                     });
-                    newApiKey.textContent = data.apiKey;
-                    apiKeyResult.style.display = 'block';
+                    newDeviceName.textContent = deviceName;
+                    deviceSuccessResult.style.display = 'block';
                     document.getElementById('deviceForm').reset();
                     allUserDevices = await fetchWithAuth(`${API_BASE}/api/devices`);
                     populateDeviceLists(allUserDevices);
@@ -894,32 +917,66 @@
                 }
             });
 
-            // H. Kontrol Toggle Switch (Kirim Perintah ke Server)
+            // H. Kontrol Toggle Switch & Slider (Kirim Perintah ke Server)
             dashboardContainer.addEventListener('change', (e) => {
-                // 1. Handle Toggle (Kode Lama)
+                // 1. Handle Toggle
                 if (e.target.classList.contains('widget-toggle')) {
                     const widgetId = e.target.dataset.widgetId;
                     const newState = e.target.checked ? 'true' : 'false';
-                    console.log(`Mengirim Toggle: ${widgetId} -> ${newState}`);
-                    socket.emit('widgetStateChange', { widgetId: widgetId, newState: newState });
+                    
+                    // Cari widget
+                    const widget = allUserWidgets.find(w => w.widget_id == widgetId);
+                    if (!widget) return;
+                    
+                    console.log(`📤 Toggle "${widget.sensor_type}": ${newState}`);
+                    
+                    // Format JSON untuk WebSocket Tunneling
+                    const command = {
+                        device: widget.device_name,      // Device name (identifier)
+                        sensor_type: widget.sensor_type,
+                        value: newState
+                    };
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify(command));
+                        widget.current_value = newState;
+                    } else {
+                        console.error('⚠️ WebSocket tidak terhubung');
+                    }
                 }
 
-                // 2. Handle Slider (TAMBAHAN BARU)
-                // Event 'change' hanya dikirim saat user MELEPAS slider (hemat bandwidth)
+                // 2. Handle Slider
                 if (e.target.classList.contains('widget-slider')) {
                     const widgetId = e.target.dataset.widgetId;
                     const newValue = e.target.value;
 
-                    // Update angka di layar
+                    // Update display angka
                     const display = document.getElementById(`val-display-${widgetId}`);
                     if (display) display.textContent = newValue;
 
-                    console.log(`Mengirim Slider: ${widgetId} -> ${newValue}`);
-                    socket.emit('widgetStateChange', { widgetId: widgetId, newState: newValue });
+                    // Cari widget
+                    const widget = allUserWidgets.find(w => w.widget_id == widgetId);
+                    if (!widget) return;
+                    
+                    console.log(`📤 Slider "${widget.sensor_type}": ${newValue}`);
+                    
+                    // Format JSON untuk WebSocket Tunneling
+                    const command = {
+                        device: widget.device_name,      // Device name (identifier)
+                        sensor_type: widget.sensor_type,
+                        value: newValue
+                    };
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify(command));
+                        widget.current_value = newValue;
+                    } else {
+                        console.error('⚠️ WebSocket tidak terhubung');
+                    }
                 }
             });
 
-            // Opsional: Agar angka berubah saat digeser (sebelum dilepas)
+            // Opsional: Update angka display saat slider digeser (sebelum dilepas)
             dashboardContainer.addEventListener('input', (e) => {
                 if (e.target.classList.contains('widget-slider')) {
                     const widgetId = e.target.dataset.widgetId;
