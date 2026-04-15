@@ -8,6 +8,7 @@ const path = require('path');
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
+const { generateSecretKey } = require('./lib/secretKeyGenerator');
 
 // Muat variabel .env sederhana tanpa dependensi tambahan.
 const envPath = path.join(__dirname, '.env');
@@ -38,6 +39,7 @@ const localIp = process.env.LOCAL_IP || '127.0.0.1';
 
 // Storage untuk tracking connected clients
 const allConnections = new Map(); // Map<connClientKey, { type: 'device'|'dashboard', ws, deviceName?, userId? }>
+const secretKeyRegistry = new Map(); // Map<secretKey, { device_id, device_name, user_id }>
 
 // Middleware
 app.use(cors());
@@ -72,6 +74,7 @@ const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite'), (err) =
         user_id INTEGER NOT NULL,
         device_name TEXT NOT NULL,
         api_key TEXT UNIQUE NOT NULL,
+        secret_key TEXT UNIQUE NOT NULL,
         public_slug TEXT UNIQUE,
         FOREIGN KEY(user_id) REFERENCES users(user_id)
     )`);
@@ -96,7 +99,97 @@ const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite'), (err) =
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(device_id) REFERENCES devices(device_id)
     )`);
+
+    // === MIGRATION: Add secret_key column if it doesn't exist ===
+    db.all("PRAGMA table_info(devices)", (err, columns) => {
+        if (err) {
+            console.error('Error checking table schema:', err);
+            loadSecretKeyRegistry(); // Try to load anyway
+            return;
+        }
+
+        const hasSecretKey = columns && columns.some(col => col.name === 'secret_key');
+        
+        if (!hasSecretKey) {
+            console.log('🔧 Migrating database: Adding secret_key column...');
+            
+            db.run('ALTER TABLE devices ADD COLUMN secret_key TEXT UNIQUE', (alterErr) => {
+                if (alterErr) {
+                    console.error('Error adding secret_key column:', alterErr);
+                    loadSecretKeyRegistry();
+                    return;
+                }
+
+                generateSecretKeysForExisting();
+            });
+        } else {
+            // Column already exists, check if devices need secret_keys
+            generateSecretKeysForExisting();
+        }
+    });
+
+    function generateSecretKeysForExisting() {
+        db.all('SELECT device_id FROM devices WHERE secret_key IS NULL OR secret_key = ""', (selectErr, devicesWithoutKey) => {
+            if (selectErr) {
+                console.error('Error fetching devices without secret_key:', selectErr);
+                loadSecretKeyRegistry();
+                return;
+            }
+
+            if (!devicesWithoutKey || devicesWithoutKey.length === 0) {
+                console.log('✓ All devices have secret_keys');
+                loadSecretKeyRegistry();
+                return;
+            }
+
+            console.log(`📝 Generating secret_keys for ${devicesWithoutKey.length} devices...`);
+            let completed = 0;
+            
+            devicesWithoutKey.forEach(device => {
+                const newKey = generateSecretKey();
+                db.run('UPDATE devices SET secret_key = ? WHERE device_id = ?', 
+                    [newKey, device.device_id],
+                    (updateErr) => {
+                        completed++;
+                        if (updateErr) {
+                            console.error(`Error updating device ${device.device_id}:`, updateErr);
+                        }
+                        if (completed === devicesWithoutKey.length) {
+                            console.log(`✓ Generated secret_keys for ${completed} devices`);
+                            loadSecretKeyRegistry();
+                        }
+                    }
+                );
+            });
+        });
+    }
 });
+
+// === HELPER: Load secret key registry ===
+function loadSecretKeyRegistry() {
+    db.all('SELECT device_id, device_name, user_id, secret_key FROM devices', (err, devices) => {
+        if (err) {
+            console.error('Error loading secret key registry:', err);
+            return;
+        }
+        
+        if (!devices) {
+            console.log('✓ No devices registered yet');
+            return;
+        }
+
+        devices.forEach(dev => {
+            if (dev.secret_key) {
+                secretKeyRegistry.set(dev.secret_key, {
+                    device_id: dev.device_id,
+                    device_name: dev.device_name,
+                    user_id: dev.user_id
+                });
+            }
+        });
+        console.log(`✓ Secret key registry loaded: ${secretKeyRegistry.size} devices`);
+    });
+}
 
 // --- KUNCI JWT ---
 const JWT_SECRET = 'INI_ADAH_KUNCI_RAHASIA_SAYA_UNTUK_SKRIPSI_2025'; // Ganti dengan kunci rahasia Anda sendiri
@@ -173,7 +266,7 @@ app.post('/login', (req, res) => {
 // Hanya untuk mendapatkan list device (dari database)
 app.get('/api/devices', autentikasiToken, (req, res) => {
     const userId = req.user.userId;
-    const query = 'SELECT device_id, device_name FROM devices WHERE user_id = ?';
+    const query = 'SELECT device_id, device_name, secret_key FROM devices WHERE user_id = ?';
 
     db.all(query, [userId], (err, results) => {
         if (err) {
@@ -184,20 +277,36 @@ app.get('/api/devices', autentikasiToken, (req, res) => {
     });
 });
 
-// Menambah device (hanya input nama, tanpa API Key)
+// Menambah device (generate secret key untuk ESP32)
 app.post('/api/devices', autentikasiToken, (req, res) => {
     const userId = req.user.userId;
     const { device_name } = req.body;
     if (!device_name) {
         return res.status(400).json({ message: 'Nama perangkat wajib diisi' });
     }
-    const query = 'INSERT INTO devices (user_id, device_name, api_key) VALUES (?, ?, ?)';
-    db.run(query, [userId, device_name, ''], function(err) {
+    
+    const secretKey = generateSecretKey();
+    const query = 'INSERT INTO devices (user_id, device_name, api_key, secret_key) VALUES (?, ?, ?, ?)';
+    db.run(query, [userId, device_name, '', secretKey], function(err) {
         if (err) {
             console.error('Error registering device:', err);
             return res.status(500).json({ message: 'Gagal mendaftarkan device' });
         }
-        res.status(201).json({ message: 'Device berhasil terdaftar', device_id: this.lastID, device_name: device_name });
+        
+        // Adicionar nova secret_key ao registry em memória
+        secretKeyRegistry.set(secretKey, {
+            device_id: this.lastID,
+            device_name: device_name,
+            user_id: userId
+        });
+        console.log(`✓ Device criado: "${device_name}" com secret_key: ${secretKey}`);
+        
+        res.status(201).json({ 
+            message: 'Device berhasil terdaftar', 
+            device_id: this.lastID, 
+            device_name: device_name,
+            secret_key: secretKey 
+        });
     });
 });
 
@@ -214,6 +323,32 @@ app.delete('/api/devices/:id', autentikasiToken, (req, res) => {
         if (this.changes === 0) {
             return res.status(404).json({ message: 'Perangkat tidak ditemukan' });
         }
+        
+        // Hapus secret key dari registry
+        const keysToDelete = [];
+        secretKeyRegistry.forEach((info, key) => {
+            if (info.device_id == deviceId) {
+                keysToDelete.push(key);
+            }
+        });
+        keysToDelete.forEach(key => {
+            secretKeyRegistry.delete(key);
+            console.log(`[✓] Secret key dihapus dari registry: ${key}`);
+        });
+        
+        // Tutup koneksi device jika masih terhubung
+        const connectionsToClose = [];
+        allConnections.forEach((conn, connKey) => {
+            if (conn.type === 'device' && conn.deviceId == deviceId && conn.ws.readyState === WebSocket.OPEN) {
+                connectionsToClose.push(connKey);
+            }
+        });
+        connectionsToClose.forEach(connKey => {
+            allConnections.get(connKey).ws.close(1000, 'Perangkat telah dihapus');
+            allConnections.delete(connKey);
+            console.log(`[✓] Koneksi device ${deviceId} ditutup`);
+        });
+        
         res.status(200).json({ message: 'Perangkat (dan semua data terkait) berhasil dihapus' });
     });
 });
@@ -222,40 +357,23 @@ app.delete('/api/devices/:id', autentikasiToken, (req, res) => {
 // --- ENDPOINT DATA SENSOR ---
 // DIHAPUS: POST /api/data (Semua data sekarang melalui WebSocket)
 
-// 2. Mengambil data (UNTUK DASHBOARD - 24 jam terakhir) - Tetap via HTTP untuk efisiensi
-app.get('/api/data', autentikasiToken, (req, res) => {
-    const userId = req.user.userId;
-        const query = `
-            SELECT sd.sensor_type, sd.value, sd.timestamp, d.device_id
-            FROM sensor_data AS sd
-            JOIN devices AS d ON sd.device_id = d.device_id
-            WHERE d.user_id = ? AND sd.timestamp >= datetime('now', '-1 day')
-            ORDER BY sd.timestamp ASC;
-        `;
-    db.all(query, [userId], (err, results) => {
-        if (err) {
-            console.error('Error fetching data:', err);
-            return res.status(500).json({ message: 'Gagal mengambil data' });
-        }
-        res.json(results);
-    });
-});
-
 // 2. Mengambil data (UNTUK DASHBOARD - 24 jam terakhir)
 app.get('/api/data', autentikasiToken, (req, res) => {
     const userId = req.user.userId;
-        const query = `
-            SELECT sd.sensor_type, sd.value, sd.timestamp, d.device_id
-            FROM sensor_data AS sd
-            JOIN devices AS d ON sd.device_id = d.device_id
-            WHERE d.user_id = ? AND sd.timestamp >= datetime('now', '-1 day')
-            ORDER BY sd.timestamp ASC;
-        `;
+    console.log(`[API] GET /api/data untuk user ID ${userId}`);
+    const query = `
+        SELECT sd.sensor_type, sd.value, sd.timestamp, d.device_id, d.device_name
+        FROM sensor_data AS sd
+        JOIN devices AS d ON sd.device_id = d.device_id
+        WHERE d.user_id = ? AND sd.timestamp >= datetime('now', '-1 day')
+        ORDER BY sd.timestamp ASC;
+    `;
     db.all(query, [userId], (err, results) => {
         if (err) {
             console.error('Error fetching data:', err);
             return res.status(500).json({ message: 'Gagal mengambil data' });
         }
+        console.log(`[API] Mengembalikan ${results ? results.length : 0} data untuk user ${userId}`);
         res.json(results);
     });
 });
@@ -349,110 +467,200 @@ app.delete('/api/widgets/:id', autentikasiToken, (req, res) => {
 
 
 // --- LOGIKA REAL-TIME WEBSOCKET TUNNELING (BROKER) ---
-// Pure WebSocket: Gaada API Key, hanya query parameter device identifier
+// Manual Handshake: Semua koneksi diizinkan pada awalnya
+// Autentikasi via pesan JSON: {"action":"auth", "key":"0Ly6kU"}
 
 wss.on('connection', (ws, req) => {
     const parsedUrl = url.parse(req.url, true);
     const query = parsedUrl.query;
     const token = query.token;      // Dashboard: JWT token
-    const deviceName = query.device; // Device: device identifier (nama)
+    const secretKeyFromUrl = query.key;  // Device: Secret key di URL
     
-    let clientType = null;      // 'device' atau 'dashboard'
-    let userId = null;          // Jika dashboard
-    let connClientKey = null;   // Unique identifier untuk koneksi ini
+    let clientType = null;          // 'device', 'dashboard', atau 'pending'
+    let authStatus = 'pending';     // 'pending' atau 'authenticated'
+    let userId = null;              // Jika dashboard atau device terauthentikasi
+    let deviceId = null;            // Jika device
+    let deviceName = null;          // Jika device
+    let connClientKey = null;       // Unique identifier
+    let authTimeout = null;         // Timeout untuk autentikasi
     
-    console.log(`[WebSocket] Koneksi baru - Device: ${deviceName}, Token: ${token ? 'ada' : 'tidak'}`);
+    console.log(`[WebSocket] 🔌 Koneksi baru - IP: ${req.socket.remoteAddress}`);
+    console.log(`[WebSocket] URL: ${req.url}`);
+    console.log(`[WebSocket] Query params - token: ${token ? 'ada' : 'tidak'}, key: ${secretKeyFromUrl ? 'ada' : 'tidak'}`);
     
-    // --- CASE 1: Device Connect (Open Connection, tidak perlu auth khusus) ---
-    if (deviceName && !token) {
-        clientType = 'device';
-        connClientKey = `device:${deviceName}`;
-        
-        // Hapus koneksi device lama dengan nama yang sama jika ada
-        const oldKey = Array.from(allConnections.entries()).find(
-            ([key, val]) => key.startsWith('device:') && val.deviceName === deviceName
-        );
-        if (oldKey) {
-            allConnections.get(oldKey[0]).ws.close();
-            allConnections.delete(oldKey[0]);
-        }
-        
-        allConnections.set(connClientKey, { type: 'device', ws, deviceName });
-        console.log(`[✓ Device] Terhubung - "${deviceName}"`);
+    // Debug: Cek secret key registry
+    console.log(`[DEBUG] Secret key registry size: ${secretKeyRegistry.size}`);
+    if (secretKeyRegistry.size > 0) {
+        console.log(`[DEBUG] Keys yang tersedia:`);
+        secretKeyRegistry.forEach((info, key) => {
+            console.log(`  - ${key} → Device ID ${info.device_id}`);
+        });
     }
+
+    // --- REGISTER ALL EVENT HANDLERS FIRST (sebelum any returns) ---
     
-    // --- CASE 2: Dashboard Connect (Perlu JWT Token) ---
-    else if (token && !deviceName) {
-        jwt.verify(token, JWT_SECRET, (err, user) => {
-            if (err) {
-                console.log(`[WebSocket] Dashboard ditolak - Token tidak valid`);
-                ws.close(1008, 'Token tidak valid');
+    // MESSAGE HANDLER
+    ws.on('message', (rawMessage) => {
+        try {
+            const messageText = rawMessage.toString();
+            console.log(`[WebSocket Message] Dari ${clientType || 'unknown'}: ${messageText.substring(0, 100)}`);
+            
+            const data = JSON.parse(messageText);
+            
+            // === HANDSHAKE AUTH UNTUK DEVICES YANG MENUNGGU ===
+            if (clientType === 'device' && authStatus === 'pending') {
+                if (data.action === 'auth' && data.key) {
+                    const secretKey = data.key;
+                    const deviceInfo = secretKeyRegistry.get(secretKey);
+                    
+                    if (!deviceInfo) {
+                        console.log(`[✗ Device] Secret key tidak valid: ${secretKey}`);
+                        ws.send(JSON.stringify({ 
+                            status: 'error', 
+                            message: 'Secret key tidak valid' 
+                        }));
+                        ws.close(1008, 'Secret key tidak valid');
+                        allConnections.delete(connClientKey);
+                        clearTimeout(authTimeout);
+                        return;
+                    }
+                    
+                    // Autentikasi berhasil
+                    authStatus = 'authenticated';
+                    deviceId = deviceInfo.device_id;
+                    deviceName = deviceInfo.device_name;
+                    userId = deviceInfo.user_id;
+                    
+                    // Tukar kunci di peta koneksi (dari menunggu ke terauthentikasi)
+                    allConnections.delete(connClientKey);
+                    connClientKey = `device:${deviceId}`;
+                    
+                    // Verifikasi koneksi sebelumnya dari device yang sama
+                    const oldKey = Array.from(allConnections.entries()).find(
+                        ([key, val]) => val.type === 'device' && val.deviceId === deviceId && val.authStatus === 'authenticated'
+                    );
+                    if (oldKey) {
+                        console.log(`[Device] Menutup koneksi sebelumnya dari "${deviceName}"`);
+                        allConnections.get(oldKey[0]).ws.close(1000, 'Koneksi baru dari device yang sama');
+                        allConnections.delete(oldKey[0]);
+                    }
+                    
+                    // Simpan klien yang terauthentikasi
+                    allConnections.set(connClientKey, { 
+                        type: 'device', 
+                        ws, 
+                        deviceId, 
+                        deviceName, 
+                        userId,
+                        authStatus: 'authenticated'
+                    });
+                    
+                    // Kirim konfirmasi
+                    ws.send(JSON.stringify({ 
+                        status: 'success', 
+                        message: `Terauthentikasi sebagai "${deviceName}"`,
+                        device_id: deviceId
+                    }));
+                    
+                    console.log(`[✓ Device] Terauthentikasi - "${deviceName}" (ID: ${deviceId})`);
+                    clearTimeout(authTimeout);
+                    return;
+                }
+                else {
+                    // Pesan tidak valid saat menunggu
+                    console.log(`[⚠️  Device] Pesan tidak valid saat handshake`);
+                    ws.send(JSON.stringify({ 
+                        status: 'error', 
+                        message: 'Kirim {"action":"auth","key":"..."} untuk authenticating' 
+                    }));
+                    return;
+                }
+            }
+            
+            // === HANYA KLIEN YANG TERAUTHENTIKASI YANG DAPAT MENGIRIM DATA ===
+            if (authStatus !== 'authenticated') {
+                console.log(`[✗] Klien yang tidak terauthentikasi mencoba mengirim data`);
                 return;
             }
             
-            clientType = 'dashboard';
-            userId = user.userId;
-            connClientKey = `dashboard:${user.userId}:${Date.now()}:${Math.random()}`;
-            
-            allConnections.set(connClientKey, { type: 'dashboard', ws, userId, username: user.username });
-            
-            console.log(`[✓ Dashboard] Terhubung - User: ${user.username} (ID: ${userId})`);
-        });
-    }
-    
-    else {
-        console.log(`[✗ Koneksi Ditolak] Butuh ?device=xxx (device) atau ?token=xxx (dashboard)`);
-        ws.close(1008, 'Argument tidak valid');
-        return;
-    }
-    
-    // --- MESSAGE HANDLER ---
-    ws.on('message', (rawMessage) => {
-        if (!clientType || !connClientKey) return;
-        
-        try {
-            const data = JSON.parse(rawMessage.toString());
-            
-            // --- DEVICE SENDS SENSOR DATA ---
+            // --- DEVICE MENGIRIM DATA SENSOR ---
             if (clientType === 'device') {
-                const { sensor_type, value } = data;
+                const { var: sensor_type, val: value } = data;
                 if (!sensor_type || value === undefined) {
-                    console.error('[Device] Pesan tidak valid - butuh sensor_type & value');
+                    console.error('[Device] Pesan tidak valid - butuh var & val');
                     return;
                 }
                 
-                console.log(`[Device "${deviceName}"] Kirim data:`, { sensor_type, value });
+                console.log(`[Device "${deviceName}"] 📤 Data: ${sensor_type} = ${value}`);
                 
-                // Broadcast ke semua dashboard
-                broadcastToAllDashboards({
+                // Simpan di database
+                db.run(
+                    'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
+                    [deviceId, sensor_type, value],
+                    (err) => {
+                        if (err) {
+                            console.error('Kesalahan saat menyimpan sensor data:', err);
+                        } else {
+                            console.log(`[✓ Database] Sensor data tersimpan: device ${deviceId}, ${sensor_type} = ${value}`);
+                        }
+                    }
+                );
+                
+                // Update widget current_value di database (jika widget ada)
+                db.run(
+                    'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
+                    [value, deviceId, sensor_type],
+                    (err) => {
+                        if (err) {
+                            console.error('Error updating widget current_value:', err);
+                        } else {
+                            console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
+                        }
+                    }
+                );
+                
+                // Broadcast ke dashboard pengguna
+                broadcastToUserDashboards(userId, {
                     device: deviceName,
-                    sensor_type: sensor_type,
-                    value: value,
+                    device_id: deviceId,
+                    var: sensor_type,
+                    val: value,
                     timestamp: new Date().toISOString()
                 });
             }
             
-            // --- DASHBOARD SENDS COMMAND TO DEVICE ---
+            // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE ---
             else if (clientType === 'dashboard') {
-                const { device, sensor_type, value } = data;
-                if (!device || !sensor_type || value === undefined) {
-                    console.error('[Dashboard] Pesan tidak valid - butuh device, sensor_type & value');
+                const { device_id, var: sensor_type, val: value } = data;
+                if (!device_id || !sensor_type || value === undefined) {
+                    console.error('[Dashboard] Pesan tidak valid - butuh device_id, var & val');
+                    ws.send(JSON.stringify({ status: 'error', message: 'Format pesan tidak valid' }));
                     return;
                 }
                 
-                console.log(`[Dashboard User ${userId}] Command ke "${device}":`, { sensor_type, value });
+                console.log(`[Dashboard User ${userId}] 📥 Perintah untuk device ${device_id}: ${sensor_type} = ${value}`);
                 
-                // Cari device connection
-                const deviceKey = Array.from(allConnections.entries()).find(
-                    ([key, val]) => val.type === 'device' && val.deviceName === device
+                // Cari koneksi device yang terauthentikasi (gunakan == untuk loose equality)
+                const deviceKeyEntry = Array.from(allConnections.entries()).find(
+                    ([key, connectionData]) => connectionData.type === 'device' && connectionData.deviceId == device_id && connectionData.authStatus === 'authenticated'
                 );
                 
-                if (deviceKey && deviceKey[1].ws.readyState === WebSocket.OPEN) {
-                    const command = { sensor_type, value };
-                    deviceKey[1].ws.send(JSON.stringify(command));
-                    console.log(`[✓ Command] Sent to "${device}"`);
+                if (deviceKeyEntry && deviceKeyEntry[1].ws.readyState === WebSocket.OPEN) {
+                    const command = { var: sensor_type, val: value };
+                    deviceKeyEntry[1].ws.send(JSON.stringify(command));
+                    console.log(`[✓ Perintah] Dikirim ke device ${device_id}: ${sensor_type} = ${value}`);
+                    
+                    // Send ACK ke dashboard
+                    ws.send(JSON.stringify({ status: 'ack', device_id, var: sensor_type, val: value }));
                 } else {
-                    console.log(`[✗ Device] "${device}" tidak terhubung`);
+                    console.log(`[✗ Device] ID ${device_id} tidak terhubung`);
+                    console.log(`[DEBUG] Koneksi device yang tersedia:`);
+                    allConnections.forEach((conn, key) => {
+                        if (conn.type === 'device') {
+                            console.log(`  - Device ${conn.deviceId} (authenticated: ${conn.authStatus === 'authenticated'}, connected: ${conn.ws.readyState === WebSocket.OPEN})`);
+                        }
+                    });
+                    ws.send(JSON.stringify({ status: 'error', message: `Device ${device_id} tidak terhubung` }));
                 }
             }
             
@@ -463,11 +671,14 @@ wss.on('connection', (ws, req) => {
     
     // --- CLOSE HANDLER ---
     ws.on('close', () => {
+        console.log(`[WebSocket] Close event`);
+        if (authTimeout) clearTimeout(authTimeout);
+        
         if (connClientKey) {
             allConnections.delete(connClientKey);
             
             if (clientType === 'device') {
-                console.log(`[Device] Terputus - "${deviceName}"`);
+                console.log(`[Device] Terputus - "${deviceName || 'menunggu'}" (ID: ${deviceId || 'N/A'})`);
             } else if (clientType === 'dashboard') {
                 console.log(`[Dashboard] Terputus - User ID ${userId}`);
             }
@@ -476,18 +687,133 @@ wss.on('connection', (ws, req) => {
     
     ws.on('error', (error) => {
         console.error('[WebSocket Error]', error.message);
+        if (authTimeout) clearTimeout(authTimeout);
     });
+
+    // --- NOW DO AUTHENTICATION (no returns that would prevent handlers) ---
+    
+    // --- DASHBOARD DENGAN JWT TOKEN (autentikasi langsung via URL) ---
+    if (token) {
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (err) {
+                console.log(`[✗ Dashboard] Token tidak valid`);
+                ws.close(1008, 'Token tidak valid');
+                return;
+            }
+            
+            clientType = 'dashboard';
+            authStatus = 'authenticated';
+            userId = user.userId;
+            connClientKey = `dashboard:${user.userId}:${Date.now()}:${Math.random()}`;
+            
+            allConnections.set(connClientKey, { type: 'dashboard', ws, userId, username: user.username });
+            console.log(`[✓ Dashboard] Terauthentikasi - User: ${user.username} (ID: ${userId})`);
+            
+            // Batalkan timeout jika ada
+            if (authTimeout) clearTimeout(authTimeout);
+        });
+        return;
+    }
+    
+    // --- DEVICE DENGAN SECRET KEY DI URL (autentikasi langsung) ---
+    if (secretKeyFromUrl) {
+        const deviceInfo = secretKeyRegistry.get(secretKeyFromUrl);
+        
+        if (!deviceInfo) {
+            console.log(`[✗ Device] Secret key di URL tidak valid: ${secretKeyFromUrl}`);
+            ws.close(1008, 'Secret key tidak valid');
+            return;
+        }
+        
+        clientType = 'device';
+        authStatus = 'authenticated';
+        deviceId = deviceInfo.device_id;
+        deviceName = deviceInfo.device_name;
+        userId = deviceInfo.user_id;
+        connClientKey = `device:${deviceId}`;
+        
+        // Cek koneksi sebelumnya dari device yang sama
+        const oldKey = Array.from(allConnections.entries()).find(
+            ([key, val]) => val.type === 'device' && val.deviceId === deviceId && val.authStatus === 'authenticated'
+        );
+        if (oldKey) {
+            console.log(`[Device] Menutup koneksi sebelumnya dari "${deviceName}"`);
+            allConnections.get(oldKey[0]).ws.close(1000, 'Koneksi baru dari device yang sama');
+            allConnections.delete(oldKey[0]);
+        }
+        
+        allConnections.set(connClientKey, { 
+            type: 'device', 
+            ws, 
+            deviceId, 
+            deviceName, 
+            userId,
+            authStatus: 'authenticated'
+        });
+        
+        console.log(`[✓ Device] Terauthentikasi via URL - "${deviceName}" (ID: ${deviceId})`);
+        
+        // Kirim konfirmasi ke device
+        ws.send(JSON.stringify({
+            status: 'success',
+            message: `Terauthentikasi sebagai "${deviceName}"`,
+            device_id: deviceId
+        }));
+        return;
+    }
+    
+    // --- DEVICE TANPA TOKEN & TANPA KEY DI URL (butuh handshake manual) ---
+    clientType = 'device';
+    authStatus = 'pending';
+    connClientKey = `device:pending:${Date.now()}:${Math.floor(Math.random() * 10000)}`;
+    
+    // Simpan klien yang menunggu
+    allConnections.set(connClientKey, { 
+        type: 'device', 
+        ws, 
+        deviceId: null, 
+        deviceName: null,
+        userId: null,
+        authStatus: 'pending'
+    });
+    
+    console.log(`[⏳ Device] Menunggu - Menunggu autentikasi...`);
+    
+    // === TIMEOUT: 20 detik untuk mengirim auth message ===
+    authTimeout = setTimeout(() => {
+        if (allConnections.has(connClientKey) && authStatus === 'pending') {
+            console.log(`[✗ Device] ⏱️  Timeout autentikasi (tidak ada pesan yang diterima)`);
+            ws.close(1008, 'Autentikasi timeout - kirim {"action":"auth","key":"..."} untuk authenticate');
+            allConnections.delete(connClientKey);
+        }
+    }, 20000);
 });
 
-// --- Helper: Broadcast ke semua dashboard ---
-function broadcastToAllDashboards(data) {
+// --- Helper: Broadcast ke dashboard pengguna ---
+function broadcastToUserDashboards(userId, data) {
     const payload = JSON.stringify(data);
+    let broadcastCount = 0;
+    
+    console.log(`[Broadcast] Mencari dashboard untuk user ID ${userId}...`);
     
     allConnections.forEach((conn, key) => {
-        if (conn.type === 'dashboard' && conn.ws && conn.ws.readyState === WebSocket.OPEN) {
-            conn.ws.send(payload);
+        if (conn.type === 'dashboard' && conn.userId === userId) {
+            console.log(`[Broadcast] Ditemukan dashboard untuk user ${conn.username || userId}`);
+            if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
+                conn.ws.send(payload);
+                broadcastCount++;
+                console.log(`[Broadcast] Data dikirim ke dashboard`);
+            } else {
+                console.log(`[Broadcast] Dashboard tidak aktif (readyState: ${conn.ws?.readyState})`);
+            }
         }
     });
+    
+    if (broadcastCount === 0) {
+        console.log(`[Broadcast] ⚠️ Tidak ada dashboard aktif untuk user ID ${userId}`);
+    } else {
+        console.log(`[Broadcast] ✓ Data dikirim ke ${broadcastCount} dashboard`);
+    }
 }
 
 

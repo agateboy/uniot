@@ -1,52 +1,201 @@
-# 🎉 UNIOT WebSocket Tunneling - Rombakan Selesai!
+# Manual Handshake Authentication - Implementation Summary
+
+## Overview
+Manual Handshake Authentication System has been successfully implemented to support restricted WebSocket clients that cannot add URL parameters (like Android WebSocket Tester).
+
+## What Changed
+
+### 1. **Backend (index.js)** ✅
+
+**Old System:**
+```javascript
+// Device connects with key in URL
+ws://server:3001/?key=0Ly6kU
+// Server validates immediately
+```
+
+**New System:**
+```javascript
+// Device connects without parameters
+ws://server:3001/
+// Then sends: {"action":"auth","key":"0Ly6kU"}
+// Server responds: {"status":"success/error",...}
+```
+
+**Key Changes:**
+- Removed URL parameter parsing for device authentication
+- Added per-connection authentication state machine
+- Implemented 3-second timeout for pending connections
+- Added `secretKeyRegistry` lookup after auth message
+- Gated sensor data reception by `authStatus === 'authenticated'`
+- Added `authTimeout` timer management
+
+**File Modified:** `/home/agate/Documents/uniot/index.js` (Lines 457-710)
 
 ---
 
-## 📝 Ringkasan Perubahan
+### 2. **Arduino Code (ESP32_NOVO_SECRET_KEY.ino)** ✅
 
-Sistem UNIOT Anda telah dirombak total dari **HTTP Polling + Socket.IO** menjadi **Pure WebSocket Tunneling**.
+**Old System:**
+```cpp
+String ws_path = String("/") + "?key=" + String(secret_key);
+webSocket.begin(ws_host, ws_port, ws_path.c_str());
+```
 
-### ✅ Yang Sudah Selesai:
+**New System:**
+```cpp
+webSocket.begin(ws_host, ws_port, "/");
+// On CONNECTED event, immediately send:
+// {"action":"auth","key":"0Ly6kU"}
+```
 
-#### 1. **Backend (Node.js / index.js)**
-- ✅ Ganti Socket.IO → WebSocket (library `ws`)
-- ✅ Hapus rute HTTP `POST /api/data` (semua data via WebSocket)
-- ✅ Hapus requirement header `x-api-key` di HTTP
-- ✅ Implementasi WebSocket Broker (routing data real-time)
-- ✅ Format JSON standar untuk semua komunikasi
-- ✅ Multi-tab support via userConnections map
-- ✅ Auto-reconnection handling
+**Key Changes:**
+- Added `isAuthenticated` flag
+- Changed WebSocket path from `/?key=...` to `/`
+- Send auth message on connection
+- Parse auth response and set `isAuthenticated`
+- Gate sensor data transmission: only send if `isAuthenticated === true`
+- Handle reconnection: reset `isAuthenticated` on each connect
 
-#### 2. **Frontend (Dashboard HTML/JS)**
-- ✅ Ganti Socket.IO → Native WebSocket
-- ✅ Update semua event listeners (socket.emit → ws.send)
-- ✅ Format JSON standar untuk toggle dan slider
-- ✅ ws.onmessage handler untuk real-time update
-- ✅ Auto-reconnect logic (retry setiap 3 detik)
-
-#### 3. **Dependencies**
-- ✅ package.json: Hapus Socket.IO, tambah ws library
-
-#### 4. **Dokumentasi Lengkap**
-- ✅ [WEBSOCKET_PROTOCOL.md](#dokumentasi) - Spesifikasi protokol + contoh kode ESP32
-- ✅ [CHANGELOG.md](#dokumentasi) - Detail perubahan & perbandingan arsitektur
-- ✅ [ESP32_MIGRATION.md](#dokumentasi) - Panduan update kode ESP32
-- ✅ [TESTING_GUIDE.md](#dokumentasi) - Testing checklist lengkap
+**File Modified:** `/home/agate/Documents/uniot/ESP32_NOVO_SECRET_KEY.ino` (Lines 39-300)
 
 ---
 
-## 🚀 Quick Start
+### 3. **Dashboard (dashboard.html)** ✓
+- **No changes required** - Dashboard still uses JWT token in URL
+- `?token=xxx` remains valid and grants immediate authentication
+- More efficient than handshake since both are on same server
 
-### 1. Install Dependencies Baru
-```bash
-cd /media/agate/ADRIAN/ADRIANRAMDHANY/MATERI/KULIAH/skripsi
-npm install
+---
+
+## Architecture Diagram
+
+```
+OLD SYSTEM:
+┌─────────────┐
+│   Device    │                    ┌───────────────┐
+│ (Arduino)   │───ws://IP:3001     │    Server     │
+└─────────────┘   /?key=0Ly6kU     └───────────────┘
+     │                                      │
+     └──────────[URL Validation]────────────┘
+                    ✓ Authenticated
+                    
+NEW SYSTEM:
+┌─────────────┐                    ┌───────────────┐
+│   Device    │                    │    Server     │
+│ (Arduino)   │───ws://IP:3001/    │  (pending)    │
+└─────────────┘                    └───────────────┘
+     │                                      │
+     └──────[{"action":"auth"...}]─────────┘
+               │
+               └─────[{"status":"success"...}]
+                        ✓ Authenticated
 ```
 
-### 2. Jalankan Server
-```bash
-npm start
+---
+
+## Connection Flow
+
 ```
+Device Side                           Server Side
+═══════════════════════════════════════════════════════════
+
+1. WiFi Connected ──────────────────────────────────────────
+   │
+2. initiate WebSocket connection
+   │                    ┌─ [Connection Opened]
+   │                    │ authStatus = 'pending'
+   │                    │ authTimeout = 3 seconds
+   │
+3. WebSocket OPEN event
+   isConnected = true
+   │
+4. Send auth message ──────────────────► onMessage handler
+   {                        │            [Validate secret_key]
+     "action":"auth",       │                    │
+     "key":"0Ly6kU"         │    ┌───────────────┘
+   }                        │    │
+   │                        │    └──► secretKeyRegistry.get()
+   │                        │         ├─ Found? authStatus='authenticated'
+   │                        │         └─ Not found? Close (1008)
+   │◄─────────────────────────────────── {status:"success/error",...}
+   │
+5. Receive response
+   if status === 'success':
+     isAuthenticated = true
+   │
+6. Loop: Read sensors ────────────────► Data Handler
+   if isAuthenticated:              Store in DB & Broadcast
+   send {"sensor_type":"suhu"...}
+   │
+7. Disconnect (network issue)
+   isConnected = false, isAuthenticated = false
+   │
+8. WiFi auto-reconnect (5s)
+   Repeat from step 1-5
+```
+
+---
+
+## Testing Resources
+
+- **Testing Guide:** [TESTING_HANDSHAKE.md](TESTING_HANDSHAKE.md)
+- **Code Examples:** [HANDSHAKE_TESTING_EXAMPLES.md](HANDSHAKE_TESTING_EXAMPLES.md)
+- **Protocol Details:** [HANDSHAKE_AUTHENTICATION.md](HANDSHAKE_AUTHENTICATION.md)
+
+---
+
+## Files Modified
+
+### Backend
+- **index.js** (Lines 457-710) - Complete rewrite of `wss.on('connection')` handler
+
+### Firmware  
+- **ESP32_NOVO_SECRET_KEY.ino** (Lines 39-300) - Added handshake support
+
+### Documentation (NEW)
+- **HANDSHAKE_AUTHENTICATION.md** - Protocol specification
+- **TESTING_HANDSHAKE.md** - Step-by-step test guide
+- **HANDSHAKE_TESTING_EXAMPLES.md** - Code examples
+
+---
+
+## Quick Start
+
+### 1. Test with Arduino
+```
+1. Edit ESP32_NOVO_SECRET_KEY.ino with WiFi credentials
+2. Update ws_host to your server IP
+3. Copy secret_key from dashboard
+4. Upload and watch serial monitor for "✓ Auth" message
+```
+
+### 2. Test with Node.js Script
+```bash
+npm install ws
+node HANDSHAKE_TESTING_EXAMPLES.js ws-test.js
+```
+
+### 3. Test with Browser Console
+```javascript
+const ws = new WebSocket('ws://localhost:3001/');
+ws.send(JSON.stringify({action:'auth',key:'0Ly6kU'}));
+```
+
+---
+
+## Status
+
+- ✅ Backend implementation complete
+- ✅ Arduino firmware updated
+- ✅ No breaking changes to dashboard
+- ✅ Documentation created
+- ✅ Testing examples provided
+- ✅ Error handling implemented
+- ✅ Timeout mechanism added
+- ✅ Authentication gating working
+
+**Ready for deployment** ✓
 
 Expected output:
 ```

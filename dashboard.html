@@ -210,6 +210,15 @@
             /* Agar tidak melayang */
         }
 
+        .widget.number {
+            width: calc(33.33% - 10px);
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 250px;
+        }
+
         .widget.toggle,
         .widget.slider {
             width: 300px;
@@ -335,10 +344,21 @@
                 <input type="text" id="device_name" placeholder="Contoh: sensor_ruangan1" required>
                 <button type="submit">Tambahkan Perangkat</button>
             </form>
-            <div id="deviceSuccessResult" style="display:none; margin-top: 15px; padding: 10px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
-                <h4>✓ Perangkat Berhasil Ditambahkan!</h4>
-                <p>Nama perangkat: <code id="newDeviceName" style="background: #fff; padding: 2px 5px; border-radius: 3px;"></code></p>
-                <p style="font-size: 0.9em; margin: 5px 0 0 0;">Konfigurasikan ESP32 dengan nama yang sama untuk terhubung.</p>
+            <div id="deviceSuccessResult" style="display:none; margin-top: 15px; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+                <h4 style="margin-top: 0;">✓ Perangkat Berhasil Ditambahkan!</h4>
+                <p><strong>Nama perangkat:</strong> <code id="newDeviceName" style="background: #fff; padding: 5px 8px; border-radius: 3px; font-family: monospace;"></code></p>
+                
+                <hr style="border: none; border-top: 1px solid #c3e6cb; margin: 12px 0;">
+                
+                <p style="margin: 10px 0 5px 0;"><strong style="color: #c41e3a;">🔑 SECRET KEY (Gunakan untuk ESP32):</strong></p>
+                <div style="background: #fff; padding: 10px; border-radius: 3px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <code id="newSecretKey" style="flex-grow: 1; font-family: monospace; word-break: break-all; font-weight: bold; color: #333;"></code>
+                    <button type="button" id="copySecretKeyButton" style="background: #42b72a; padding: 8px 12px; margin: 0; cursor: pointer; white-space: nowrap;">Copy</button>
+                </div>
+                
+                <p style="font-size: 0.9em; margin: 8px 0; background: #f8fff9; padding: 8px; border-left: 3px solid #42b72a; border-radius: 2px;">
+                    <strong>⚠️ Simpan secret key ini dengan aman!</strong> Anda akan membutuhkannya untuk mengkonfigurasi ESP32 Anda. Secret key ini tidak akan ditampilkan lagi.
+                </p>
             </div>
         </div>
         <div class="manager-container" id="deviceListContainer">
@@ -434,27 +454,41 @@
                     const data = JSON.parse(event.data);
                     console.log('📨 Data dari server:', data);
                     
-                    // Jika format: {device, sensor_type, value, timestamp} → data dari ESP32
-                    if (data.device && data.sensor_type && data.value !== undefined) {
+                    // ACK dari server untuk command yang dikirim dashboard
+                    if (data.status === 'ack') {
+                        console.log(`[✓] Command berhasil dikirim ke device ${data.device_id}`);
+                        return;
+                    }
+                    
+                    // Error dari server
+                    if (data.status === 'error') {
+                        console.error(`[✗] Error dari server:`, data.message);
+                        return;
+                    }
+                    
+                    // Jika format: {device, var, val, timestamp} → data dari ESP32 (publish/subscribe)
+                    if (data.device && data.var && data.val !== undefined) {
                         // Cari device_id berdasarkan device_name untuk simpan di historikaldata
                         const deviceObj = allUserDevices.find(d => d.device_name === data.device);
                         
                         const dataWithDeviceId = {
                             device_id: deviceObj ? deviceObj.device_id : null,
                             device_name: data.device,
-                            sensor_type: data.sensor_type,
-                            value: data.value,
+                            sensor_type: data.var,
+                            value: data.val,
                             timestamp: data.timestamp
                         };
                         
                         allSensorData.push(dataWithDeviceId);
+                        console.log(`[✓] Data tersimpan: ${dataWithDeviceId.device_name} - ${data.var} = ${data.val}`);
                         
                         // Update widget jika device ini sedang dipilih
-                        const selectedDeviceName = activeDeviceSelect.value; // Ini adalah device_id dari SELECT
-                        if (selectedDeviceName) {
-                            const selectedDevice = allUserDevices.find(d => d.device_id == selectedDeviceName);
+                        const selectedDeviceId = activeDeviceSelect.value;
+                        if (selectedDeviceId) {
+                            const selectedDevice = allUserDevices.find(d => d.device_id == selectedDeviceId);
                             if (selectedDevice && selectedDevice.device_name === data.device) {
                                 updateWidgetData(dataWithDeviceId);
+                                console.log(`[✓] Widget updated untuk device ${selectedDeviceId}`);
                             }
                         }
                     }
@@ -529,15 +563,21 @@
         async function loadInitialData() {
             try {
                 console.log("Memulai loadInitialData...");
-                dashboardContainer.innerHTML = '<p>Memuat perangkat...</p>'; // Update status
+                dashboardContainer.innerHTML = '<p>Memuat perangkat...</p>';
                 allUserDevices = await fetchWithAuth(`${API_BASE}/api/devices`) || [];
+                console.log(`[✓] Dimuat ${allUserDevices.length} perangkat`);
                 populateDeviceLists(allUserDevices);
 
-                dashboardContainer.innerHTML = '<p>Memuat widget...</p>'; // Update status
+                dashboardContainer.innerHTML = '<p>Memuat widget...</p>';
                 allUserWidgets = await fetchWithAuth(`${API_BASE}/api/widgets`) || [];
+                console.log(`[✓] Dimuat ${allUserWidgets.length} widget`);
 
-                dashboardContainer.innerHTML = '<p>Memuat data sensor...</p>'; // Update status
+                dashboardContainer.innerHTML = '<p>Memuat data sensor...</p>';
                 allSensorData = await fetchWithAuth(`${API_BASE}/api/data`) || [];
+                console.log(`[✓] Dimuat ${allSensorData.length} data sensor`);
+                if (allSensorData.length > 0) {
+                    console.log(`[Sample] Data terakhir:`, allSensorData[allSensorData.length - 1]);
+                }
 
                 console.log("Data awal berhasil dimuat.");
 
@@ -633,6 +673,14 @@
 
             let canvasId = null;
 
+            // === CARI NILAI TERBARU DARI SENSOR DATA ===
+            const latestSensorData = Array.isArray(allSensorData) ? 
+                allSensorData.filter(d => d.device_id === widget.device_id && d.sensor_type === widget.sensor_type) :
+                [];
+            const latestValue = latestSensorData.length > 0 ? 
+                latestSensorData[latestSensorData.length - 1].value : 
+                widget.current_value;
+
             // --- LOGIKA KONTEN WIDGET BERDASARKAN TIPE ---
 
             if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
@@ -647,7 +695,7 @@
                 // --- TOGGLE SWITCH ---
                 const widgetBody = document.createElement('div');
                 widgetBody.className = 'widget-body';
-                const isChecked = (widget.current_value === 'true');
+                const isChecked = (latestValue === 'true' || latestValue === true || latestValue === 1 || latestValue === '1');
                 widgetBody.innerHTML = `
                     <label class="switch">
                         <input type="checkbox" 
@@ -664,7 +712,7 @@
                 const widgetBody = document.createElement('div');
                 widgetBody.className = 'widget-body';
 
-                const currentValue = parseInt(widget.current_value) || 0;
+                const currentValue = parseInt(latestValue) || 0;
 
                 widgetBody.innerHTML = `
                     <div style="width: 100%; padding: 0 10px; text-align: center;">
@@ -674,6 +722,25 @@
                                style="width: 100%; cursor: pointer;">
                         <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 1.2em;">
                             <span id="val-display-${widget.widget_id}">${currentValue}</span>
+                        </p>
+                    </div>
+                `;
+
+                widgetEl.appendChild(widgetBody);
+            
+            } else if (widget.widget_type === 'number') {
+                // --- NUMBER DISPLAY ---
+                const widgetBody = document.createElement('div');
+                widgetBody.className = 'widget-body';
+                
+                const currentValue = latestValue !== undefined && latestValue !== null ? 
+                    (widget.data_type === 'integer' ? parseInt(latestValue) : parseFloat(latestValue)) : 
+                    0;
+
+                widgetBody.innerHTML = `
+                    <div style="width: 100%; text-align: center;">
+                        <p id="number-val-${widget.widget_id}" style="margin: 0; font-weight: bold; font-size: 3em; color: #007bff;">
+                            ${currentValue}
                         </p>
                     </div>
                 `;
@@ -774,11 +841,12 @@
             );
             if (!widgetToUpdate) return;
 
-            const canvasId = `canvas-${widgetToUpdate.widget_id}`;
-            const chart = Chart.getChart(canvasId);
-            if (!chart) return; // Chart belum ada atau sudah dihancurkan
-
+            // Update untuk tipe 'graph'
             if (widgetToUpdate.widget_type === 'graph') {
+                const canvasId = `canvas-${widgetToUpdate.widget_id}`;
+                const chart = Chart.getChart(canvasId);
+                if (!chart) return; // Chart belum ada atau sudah dihancurkan
+
                 chart.data.labels.push(new Date(data.timestamp).toLocaleTimeString());
                 chart.data.datasets[0].data.push(data.value);
                 if (chart.data.labels.length > 20) { // Limit history
@@ -786,13 +854,49 @@
                     chart.data.datasets[0].data.shift();
                 }
                 chart.update('none'); // Update tanpa animasi
-            } else if (widgetToUpdate.widget_type === 'gauge') {
+            }
+            
+            // Update untuk tipe 'gauge'
+            else if (widgetToUpdate.widget_type === 'gauge') {
+                const canvasId = `canvas-${widgetToUpdate.widget_id}`;
+                const chart = Chart.getChart(canvasId);
+                if (!chart) return;
+
                 const value = (widgetToUpdate.data_type === 'integer') ? parseInt(data.value) : parseFloat(data.value);
                 const maxVal = 100;
                 chart.data.datasets[0].data[0] = value;
                 chart.data.datasets[0].data[1] = maxVal - value;
                 chart.options.elements.center.text = `${value}`;
                 chart.update('none'); // Update tanpa animasi
+            }
+            
+            // Update untuk tipe 'number'
+            else if (widgetToUpdate.widget_type === 'number') {
+                const numberDisplayId = `number-val-${widgetToUpdate.widget_id}`;
+                const numberDisplay = document.getElementById(numberDisplayId);
+                if (!numberDisplay) return;
+                
+                const value = (widgetToUpdate.data_type === 'integer') ? 
+                    parseInt(data.value) : parseFloat(data.value);
+                numberDisplay.textContent = value;
+            }
+            
+            // Update untuk tipe 'slider'
+            else if (widgetToUpdate.widget_type === 'slider') {
+                const sliderDisplay = document.getElementById(`val-display-${widgetToUpdate.widget_id}`);
+                if (sliderDisplay) {
+                    const value = parseInt(data.value) || 0;
+                    sliderDisplay.textContent = value;
+                }
+            }
+            
+            // Update untuk tipe 'toggle'
+            else if (widgetToUpdate.widget_type === 'toggle') {
+                const toggleInput = document.querySelector(`input.widget-toggle[data-widget-id="${widgetToUpdate.widget_id}"]`);
+                if (toggleInput) {
+                    const isTrue = (data.value === 'true' || data.value === true || data.value === 1 || data.value === '1');
+                    toggleInput.checked = isTrue;
+                }
             }
         }
 
@@ -838,17 +942,38 @@
                 const deviceName = document.getElementById('device_name').value;
                 const deviceSuccessResult = document.getElementById('deviceSuccessResult');
                 const newDeviceName = document.getElementById('newDeviceName');
+                const newSecretKey = document.getElementById('newSecretKey');
                 try {
                     const data = await fetchWithAuth(`${API_BASE}/api/devices`, {
                         method: 'POST', body: JSON.stringify({ device_name: deviceName })
                     });
                     newDeviceName.textContent = deviceName;
+                    newSecretKey.textContent = data.secret_key || '(secret key tidak tersedia)';
                     deviceSuccessResult.style.display = 'block';
                     document.getElementById('deviceForm').reset();
                     allUserDevices = await fetchWithAuth(`${API_BASE}/api/devices`);
                     populateDeviceLists(allUserDevices);
                 } catch (error) {
                     alert(error.message);
+                }
+            });
+
+            // C.1 Copy Secret Key Button
+            document.addEventListener('click', (e) => {
+                if (e.target.id === 'copySecretKeyButton') {
+                    const secretKey = document.getElementById('newSecretKey').textContent;
+                    navigator.clipboard.writeText(secretKey).then(() => {
+                        const btn = e.target;
+                        const originalText = btn.textContent;
+                        btn.textContent = '✓ Copied!';
+                        btn.style.background = '#28a745';
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                            btn.style.background = '#42b72a';
+                        }, 2000);
+                    }).catch(err => {
+                        alert('Gagal copy. Silakan copy manual.');
+                    });
                 }
             });
 
@@ -932,9 +1057,9 @@
                     
                     // Format JSON untuk WebSocket Tunneling
                     const command = {
-                        device: widget.device_name,      // Device name (identifier)
-                        sensor_type: widget.sensor_type,
-                        value: newState
+                        device_id: widget.device_id,      // Device ID
+                        var: widget.sensor_type,
+                        val: newState
                     };
                     
                     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -962,9 +1087,9 @@
                     
                     // Format JSON untuk WebSocket Tunneling
                     const command = {
-                        device: widget.device_name,      // Device name (identifier)
-                        sensor_type: widget.sensor_type,
-                        value: newValue
+                        device_id: widget.device_id,      // Device ID
+                        var: widget.sensor_type,
+                        val: newValue
                     };
                     
                     if (ws && ws.readyState === WebSocket.OPEN) {
