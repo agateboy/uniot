@@ -45,12 +45,12 @@ const secretKeyRegistry = new Map(); // Map<secretKey, { device_id, device_name,
 app.use(cors());
 app.use(express.json());
 
-// Serve file statis HTML/JS dari root folder
-app.use(express.static(__dirname));
+// Serve file statis HTML/JS dari public folder
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Arahkan GET / ke index.html
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // --- KONEKSI DATABASE SQLITE ---

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Public Monitoring</title>
+    <style>
+        body { font-family: sans-serif; background: #e9ecef; padding: 20px; text-align: center; }
+        h1 { color: #333; }
+        .container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin-top: 20px; }
+        .widget { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 350px; }
+        .widget h3 { border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-top: 0; text-transform: capitalize; }
+        
+        /* Indikator Status untuk Toggle (Read Only) */
+        .status-badge { display: inline-block; padding: 10px 20px; border-radius: 20px; font-weight: bold; color: white; }
+        .on { background-color: #28a745; }
+        .off { background-color: #dc3545; }
+
+        /* Style untuk Nilai Text */
+        .tv-val { font-size: 2.5rem; margin: 20px 0; color: #333; }
+
+        /* Style untuk Slider Read-Only */
+        .slider-container { margin-top: 20px; }
+        .slider-val { font-size: 2rem; font-weight: bold; color: #007bff; display: block; margin-bottom: 10px; }
+        input[type=range][disabled] { opacity: 0.8; cursor: not-allowed; width: 100%; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <h1 id="pageTitle">Memuat Data...</h1>
+    <div id="dashboard-container" class="container"></div>
+
+    <script>
+        // Ambil SLUG dari URL
+        const pathSegments = window.location.pathname.split('/');
+        const slug = pathSegments[pathSegments.length - 1];
+
+        window.publicCharts = {};
+
+        async function loadData() {
+            try {
+                const response = await fetch(`/api/public/view/${slug}`);
+                if (!response.ok) throw new Error('Halaman tidak ditemukan');
+                
+                const result = await response.json();
+                document.getElementById('pageTitle').textContent = result.device_name;
+                renderWidgets(result.widgets, result.data);
+                setupSocket();
+            } catch (error) {
+                document.body.innerHTML = `<h1>404</h1><p>${error.message}</p>`;
+            }
+        }
+
+        function renderWidgets(widgets, data) {
+            const container = document.getElementById('dashboard-container');
+            container.innerHTML = ''; 
+
+            widgets.forEach(w => {
+                const div = document.createElement('div');
+                div.dataset.sensorType = w.sensor_type;
+                div.className = 'widget';
+                div.innerHTML = `<h3>${w.sensor_type}</h3><div class="widget-content"></div>`;
+                const contentDiv = div.querySelector('.widget-content');
+                
+                const widgetData = data.filter(d => d.sensor_type === w.sensor_type);
+
+                if (w.widget_type === 'graph') {
+                    // --- GRAPH ---
+                    const canvas = document.createElement('canvas');
+                    contentDiv.appendChild(canvas);
+                    container.appendChild(div);
+                    const chart = new Chart(canvas, {
+                        type: 'line',
+                        data: {
+                            labels: widgetData.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                            datasets: [{ label: w.sensor_type, data: widgetData.map(d => d.value), borderColor: '#007bff', tension: 0.1 }]
+                        }
+                    });
+                    window.publicCharts[w.sensor_type] = chart;
+
+                } else if (w.widget_type === 'toggle') {
+                    // --- TOGGLE (Status Only) ---
+                    const isOn = (w.current_value === 'true');
+                    contentDiv.innerHTML = `<span class="status-badge ${isOn ? 'on' : 'off'}">${isOn ? 'NYALA' : 'MATI'}</span>`;
+                    container.appendChild(div);
+
+                } else if (w.widget_type === 'slider') {
+                    // --- SLIDER (Read Only) ---
+                    // PERBAIKAN: Ambil nilai dari current_value, bukan widgetData
+                    const val = parseInt(w.current_value) || 0;
+                    
+                    contentDiv.innerHTML = `
+                        <div class="slider-container">
+                            <span class="slider-val">${val}</span>
+                            <input type="range" min="0" max="255" value="${val}" disabled>
+                        </div>
+                    `;
+                    container.appendChild(div);
+
+                } else {
+                    // --- GAUGE / TEXT LAINNYA ---
+                    const val = widgetData.length > 0 ? widgetData[widgetData.length-1].value : '-';
+                    contentDiv.innerHTML = `<h1 class="tv-val">${val}</h1>`;
+                    container.appendChild(div);
+                }
+            });
+        }
+
+        let socket = null;
+        function setupSocket() {
+            if (socket) return; 
+            socket = io({ auth: { slug } });
+
+            // Listener untuk update state (Toggle & Slider)
+            socket.on('publicWidgetUpdated', (update) => {
+                try {
+                    const { sensor_type, current_value } = update;
+                    const el = document.querySelector(`[data-sensor-type="${sensor_type}"]`);
+                    if (!el) return;
+
+                    // Update Toggle
+                    const badge = el.querySelector('.status-badge');
+                    if (badge) {
+                        const isOn = (current_value === 'true');
+                        badge.classList.toggle('on', isOn);
+                        badge.classList.toggle('off', !isOn);
+                        badge.textContent = isOn ? 'NYALA' : 'MATI';
+                    }
+
+                    // Update Slider (BARU)
+                    const sliderInput = el.querySelector('input[type="range"]');
+                    const sliderValText = el.querySelector('.slider-val');
+                    if (sliderInput && sliderValText) {
+                        sliderInput.value = current_value;
+                        sliderValText.textContent = current_value;
+                    }
+
+                } catch (e) { console.error('publicWidgetUpdated handler error', e); }
+            });
+
+            // Listener untuk data sensor baru (Graph & Text)
+            socket.on('publicNewData', (d) => {
+                try {
+                    const { sensor_type, value, timestamp } = d;
+                    
+                    // Update Chart
+                    const chart = window.publicCharts[sensor_type];
+                    if (chart) {
+                        chart.data.labels.push(new Date(timestamp).toLocaleTimeString());
+                        chart.data.datasets[0].data.push(value);
+                        if (chart.data.labels.length > 40) {
+                            chart.data.labels.shift();
+                            chart.data.datasets[0].data.shift();
+                        }
+                        chart.update();
+                    }
+
+                    // Update Text Value
+                    const valEl = document.querySelector(`[data-sensor-type="${sensor_type}"] .tv-val`);
+                    if (valEl) valEl.textContent = value;
+
+                } catch (e) { console.error('publicNewData handler error', e); }
+            });
+        }
+
+        loadData();
+    </script>
+</body>
+</html>

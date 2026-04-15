@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard UNIOTya</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            background: #f4f7f6;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #333;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        input[type="text"],
+        select {
+            width: 250px;
+            padding: 8px;
+            margin: 5px 0 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        hr {
+            border: 0;
+            border-top: 1px solid #eee;
+            margin: 20px 0;
+        }
+
+        #logoutButton {
+            background: #dc3545;
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        #logoutButton:hover {
+            background: #c82333;
+        }
+
+        .container-wrapper {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .manager-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            flex-basis: 400px;
+            box-sizing: border-box;
+        }
+
+        #deviceList ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        #deviceList li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .btn-delete {
+            background-color: #dc3545;
+            padding: 5px 10px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+
+        .btn-delete:hover {
+            background-color: #c82333;
+        }
+
+        #dashboard-controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            margin-top: 20px;
+            box-sizing: border-box;
+        }
+
+        #dashboard-controls label {
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        #dashboard-controls select {
+            width: 300px;
+        }
+
+        #showWidgetFormButton {
+            background: #28a745;
+            margin-left: 15px;
+        }
+
+        #showWidgetFormButton:hover {
+            background: #218838;
+        }
+
+        #downloadCsvButton {
+            background-color: #17a2b8;
+            margin-left: 10px;
+        }
+
+        #downloadCsvButton:hover {
+            background-color: #117a8b;
+        }
+
+        #widgetFormContainer {
+            background: #fdfdfd;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            margin-top: 15px;
+        }
+
+        #dashboard-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        /* --- Style Widget --- */
+        .widget {
+            position: relative;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+        }
+
+        .widget h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .widget.graph {
+            width: calc(50% - 10px);
+            height: 350px;
+            min-width: 400px;
+        }
+
+        /* Lebar widget graph */
+        .widget.gauge {
+            width: calc(33.33% - 10px);
+            height: 300px;
+            min-width: 250px;
+        }
+
+        /* Lebar widget gauge */
+        .widget.toggle {
+            width: calc(33.33% - 10px);
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-width: 250px;
+        }
+
+        .widget.slider {
+            /* Gunakan ukuran yang sama dengan Toggle */
+            width: calc(33.33% - 10px);
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-width: 250px;
+
+            /* Pastikan background putih & ada border */
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+            position: relative;
+            /* Agar tidak melayang */
+        }
+
+        .widget.number {
+            width: calc(33.33% - 10px);
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 250px;
+        }
+
+        .widget.toggle,
+        .widget.slider {
+            width: 300px;
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            /* Tambahkan ini agar isi tidak keluar */
+            overflow: hidden;
+        }
+
+
+        .widget-delete {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            font-size: 1.2em;
+            line-height: 25px;
+            padding: 0;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .widget-delete:hover {
+            background: #e60000;
+        }
+
+        .widget-body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-grow: 1;
+            width: 100%;
+            /* Paksa lebar penuh */
+            box-sizing: border-box;
+            /* Agar padding dihitung dalam lebar */
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #2196F3;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(26px);
+        }
+
+        /* ------------------------------------ */
+
+        /* Responsif sederhana */
+        @media (max-width: 768px) {
+
+            .widget.graph,
+            .widget.gauge,
+            .widget.toggle,
+            .widget.slider {
+                width: 100%;
+            }
+
+            .container-wrapper {
+                flex-direction: column;
+            }
+
+            .manager-container {
+                flex-basis: auto;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <h1>Dashboard Saya</h1>
+    <button id="logoutButton">Logout</button>
+
+    <div class="container-wrapper">
+        <div class="manager-container">
+            <h2>Manajemen Perangkat</h2>
+            <form id="deviceForm">
+                <label for="device_name">Nama Perangkat Baru:</label>
+                <input type="text" id="device_name" placeholder="Contoh: sensor_ruangan1" required>
+                <button type="submit">Tambahkan Perangkat</button>
+            </form>
+            <div id="deviceSuccessResult" style="display:none; margin-top: 15px; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+                <h4 style="margin-top: 0;">✓ Perangkat Berhasil Ditambahkan!</h4>
+                <p><strong>Nama perangkat:</strong> <code id="newDeviceName" style="background: #fff; padding: 5px 8px; border-radius: 3px; font-family: monospace;"></code></p>
+                
+                <hr style="border: none; border-top: 1px solid #c3e6cb; margin: 12px 0;">
+                
+                <p style="margin: 10px 0 5px 0;"><strong style="color: #c41e3a;">🔑 SECRET KEY (Gunakan untuk ESP32):</strong></p>
+                <div style="background: #fff; padding: 10px; border-radius: 3px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <code id="newSecretKey" style="flex-grow: 1; font-family: monospace; word-break: break-all; font-weight: bold; color: #333;"></code>
+                    <button type="button" id="copySecretKeyButton" style="background: #42b72a; padding: 8px 12px; margin: 0; cursor: pointer; white-space: nowrap;">Copy</button>
+                </div>
+                
+                <p style="font-size: 0.9em; margin: 8px 0; background: #f8fff9; padding: 8px; border-left: 3px solid #42b72a; border-radius: 2px;">
+                    <strong>⚠️ Simpan secret key ini dengan aman!</strong> Anda akan membutuhkannya untuk mengkonfigurasi ESP32 Anda. Secret key ini tidak akan ditampilkan lagi.
+                </p>
+            </div>
+        </div>
+        <div class="manager-container" id="deviceListContainer">
+            <h2>Daftar Perangkat Saya</h2>
+            <ul id="deviceList">
+                <p>Memuat perangkat...</p>
+            </ul>
+
+        </div>
+    </div>
+
+    <hr>
+
+    <div id="dashboard-controls">
+        <label for="activeDeviceSelect">Pilih Perangkat Aktif:</label>
+        <select id="activeDeviceSelect">
+            <option value="">-- Pilih Perangkat --</option>
+        </select>
+        <button id="showWidgetFormButton" style="display: none;">+ Tambah Variabel</button>
+        <button id="shareDeviceButton" style="background-color: #6f42c1; margin-left: 10px;">Share Link</button>
+
+        <div id="widgetFormContainer" style="display: none;">
+            <h3 id="widgetFormTitle">Tambah Variabel Baru untuk...</h3>
+            <form id="widgetForm">
+                <div>
+                    <label for="sensorType">Nama Variabel (Sensor/Output):</label>
+                    <input type="text" id="sensorType" placeholder="Misal: suhu, atau led_biru" required>
+                </div>
+                <div>
+                    <label for="widgetType">Tipe Visualisasi:</label>
+                    <select id="widgetType" required>
+                        <option value="graph">Graph (Line Chart)</option>
+                        <option value="gauge">Gauge (Meteran)</option>
+                        <option value="number">Number (Angka)</option>
+                        <option value="toggle">Toggle (True/False)</option>
+                        <option value="slider">Slider (PWM)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="dataType">Tipe Data:</label>
+                    <select id="dataType" required>
+                        <option value="float">Float (Desimal)</option>
+                        <option value="integer">Integer (Bulat)</option>
+                        <option value="boolean">Boolean (True/False)</option>
+                    </select>
+                </div>
+                <button type="submit">Simpan Widget</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard-container">
+        <p>Memuat data perangkat...</p>
+    </div>
+
+    <script>
+                // Batasi tipe data jika widgetType toggle atau number
+                document.addEventListener('DOMContentLoaded', () => {
+                    const widgetTypeSelect = document.getElementById('widgetType');
+                    const dataTypeSelect = document.getElementById('dataType');
+                    widgetTypeSelect.addEventListener('change', function() {
+                        if (this.value === 'toggle') {
+                            dataTypeSelect.innerHTML = '<option value="boolean">Boolean (True/False)</option>';
+                        } else if (this.value === 'number') {
+                            dataTypeSelect.innerHTML = '<option value="float">Float (Desimal)</option><option value="integer">Integer (Bulat)</option>';
+                        } else {
+                            dataTypeSelect.innerHTML = '<option value="float">Float (Desimal)</option><option value="integer">Integer (Bulat)</option><option value="boolean">Boolean (True/False)</option>';
+                        }
+                    });
+                });
+        const token = localStorage.getItem('iot_token');
+        if (!token) {
+            window.location.href = 'login.html';
+        }
+
+        const API_BASE = window.location.origin;
+
+        // --- Koneksi WebSocket Native ---
+        let ws = null;
+
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}?token=${encodeURIComponent(token)}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('✓ WebSocket terhubung ke server!');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 Data dari server:', data);
+                    
+                    // ACK dari server untuk command yang dikirim dashboard
+                    if (data.status === 'ack') {
+                        console.log(`[✓] Command berhasil dikirim ke device ${data.device_id}`);
+                        return;
+                    }
+                    
+                    // Error dari server
+                    if (data.status === 'error') {
+                        console.error(`[✗] Error dari server:`, data.message);
+                        return;
+                    }
+                    
+                    // Jika format: {device, var, val, timestamp} → data dari ESP32 (publish/subscribe)
+                    if (data.device && data.var && data.val !== undefined) {
+                        // Cari device_id berdasarkan device_name untuk simpan di historikaldata
+                        const deviceObj = allUserDevices.find(d => d.device_name === data.device);
+                        
+                        const dataWithDeviceId = {
+                            device_id: deviceObj ? deviceObj.device_id : null,
+                            device_name: data.device,
+                            sensor_type: data.var,
+                            value: data.val,
+                            timestamp: data.timestamp
+                        };
+                        
+                        allSensorData.push(dataWithDeviceId);
+                        console.log(`[✓] Data tersimpan: ${dataWithDeviceId.device_name} - ${data.var} = ${data.val}`);
+                        
+                        // Update widget jika device ini sedang dipilih
+                        const selectedDeviceId = activeDeviceSelect.value;
+                        if (selectedDeviceId) {
+                            const selectedDevice = allUserDevices.find(d => d.device_id == selectedDeviceId);
+                            if (selectedDevice && selectedDevice.device_name === data.device) {
+                                updateWidgetData(dataWithDeviceId);
+                                console.log(`[✓] Widget updated untuk device ${selectedDeviceId}`);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('JSON parse error:', error);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                console.log('⚠️ WebSocket connection closed');
+                // Auto-reconnect dalam 3 detik
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        // Jangan tunggu DOMContentLoaded, langsung connect WebSocket
+        connectWebSocket();
+
+
+        // --- Variabel Global & Element DOM ---
+        const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+        let allUserDevices = [];
+        let allUserWidgets = [];
+        let allSensorData = [];
+
+        // DEKLARASIKAN DI SINI (jangan di-assign)
+        let dashboardContainer, activeDeviceSelect, deviceList, showWidgetFormButton, widgetFormContainer, widgetFormTitle;
+
+        // --- Fungsi Helper Error & Auth ---
+        function handleAuthError() {
+            if (!window.location.pathname.endsWith('login.html')) {
+                alert('Sesi Anda tidak valid atau telah berakhir. Harap login kembali.');
+                localStorage.removeItem('iot_token');
+                window.location.href = 'login.html';
+            }
+        }
+
+        async function fetchWithAuth(url, options = {}) {
+            let response;
+            try {
+                response = await fetch(url, { headers, ...options });
+                if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) { handleAuthError(); throw new Error('Authentication failed'); } // Redirect on auth fail
+                    let errorText = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorText = errorData.message || JSON.stringify(errorData);
+                    } catch (jsonError) {
+                        try { errorText = await response.text(); } catch (textError) { errorText = response.statusText || errorText; }
+                    }
+                    throw new Error(errorText);
+                }
+                try {
+                    const data = await response.json();
+                    return data;
+                } catch (parseError) {
+                    console.error(`Gagal parsing JSON dari ${url}:`, parseError, await response.text()); // Log raw response text
+                    throw new Error(`Respons server tidak valid (bukan JSON) untuk ${url}`);
+                }
+            } catch (networkError) {
+                console.error(`Fetch error (Network or other) untuk ${url}:`, networkError);
+                throw networkError; // Re-throw network errors
+            }
+        }
+
+
+        // --- FUNGSI PEMUATAN DATA (DATA LOADING) ---
+        async function loadInitialData() {
+            try {
+                console.log("Memulai loadInitialData...");
+                dashboardContainer.innerHTML = '<p>Memuat perangkat...</p>';
+                allUserDevices = await fetchWithAuth(`${API_BASE}/api/devices`) || [];
+                console.log(`[✓] Dimuat ${allUserDevices.length} perangkat`);
+                populateDeviceLists(allUserDevices);
+
+                dashboardContainer.innerHTML = '<p>Memuat widget...</p>';
+                allUserWidgets = await fetchWithAuth(`${API_BASE}/api/widgets`) || [];
+                console.log(`[✓] Dimuat ${allUserWidgets.length} widget`);
+
+                dashboardContainer.innerHTML = '<p>Memuat data sensor...</p>';
+                allSensorData = await fetchWithAuth(`${API_BASE}/api/data`) || [];
+                console.log(`[✓] Dimuat ${allSensorData.length} data sensor`);
+                if (allSensorData.length > 0) {
+                    console.log(`[Sample] Data terakhir:`, allSensorData[allSensorData.length - 1]);
+                }
+
+                console.log("Data awal berhasil dimuat.");
+
+                if (Array.isArray(allUserDevices) && allUserDevices.length > 0) {
+                    const firstDeviceId = allUserDevices[0].device_id;
+                    console.log(`Auto-select perangkat pertama: ID ${firstDeviceId}`);
+                    activeDeviceSelect.value = firstDeviceId;
+                    displayWidgetsForDevice(firstDeviceId);
+                } else {
+                    console.log("Tidak ada perangkat ditemukan.");
+                    dashboardContainer.innerHTML = '<p>Anda belum mendaftarkan perangkat...</p>';
+                }
+            } catch (error) {
+                console.error("Terjadi error di loadInitialData:", error.message);
+                dashboardContainer.innerHTML = `<p style="color: red;">Gagal memuat data awal. ${error.message}. Coba refresh (F5).</p>`;
+            }
+        }
+
+        function populateDeviceLists(devices) {
+            activeDeviceSelect.innerHTML = '<option value="">-- Pilih Perangkat --</option>';
+            deviceList.innerHTML = '';
+            if (!Array.isArray(devices) || devices.length === 0) {
+                deviceList.innerHTML = '<li>Anda belum mendaftarkan perangkat.</li>';
+                return;
+            }
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.device_id;
+                option.textContent = device.device_name;
+                activeDeviceSelect.appendChild(option);
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <span>${device.device_name}</span>
+                    <button class="btn-delete" data-device-id="${device.device_id}">Hapus</button>
+                `;
+                deviceList.appendChild(li);
+            });
+        }
+
+        function displayWidgetsForDevice(selectedDeviceId) {
+            dashboardContainer.innerHTML = '';
+
+            if (!selectedDeviceId) {
+                dashboardContainer.innerHTML = '<p>Silakan pilih perangkat aktif...</p>';
+                showWidgetFormButton.style.display = 'none';
+                widgetFormContainer.style.display = 'none';
+                return;
+            }
+
+            showWidgetFormButton.style.display = 'inline-block';
+
+            const selectedDevice = Array.isArray(allUserDevices) ? allUserDevices.find(d => d.device_id == selectedDeviceId) : null;
+            if (!selectedDevice) {
+                console.error("Perangkat yang dipilih tidak ditemukan di data global!");
+                widgetFormTitle.textContent = 'Tambah Variabel Baru';
+            } else {
+                widgetFormTitle.textContent = `Tambah Variabel Baru untuk "${selectedDevice.device_name}"`;
+            }
+
+            const widgetsToDisplay = Array.isArray(allUserWidgets) ? allUserWidgets.filter(w => w.device_id == selectedDeviceId) : [];
+            if (widgetsToDisplay.length === 0) {
+                dashboardContainer.innerHTML = '<p>Perangkat ini belum memiliki widget.</p>';
+                return;
+            }
+            widgetsToDisplay.forEach(widget => {
+                renderWidget(widget);
+            });
+        }
+        function renderWidget(widget) {
+            // 1. Buat Wadah Utama Widget (Kotak Putih)
+            const widgetEl = document.createElement('div');
+            widgetEl.className = `widget ${widget.widget_type}`;
+            widgetEl.id = `widget-${widget.widget_id}`;
+
+            // 2. Buat Tombol Hapus
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'widget-delete';
+            deleteButton.innerHTML = '&times;';
+            deleteButton.dataset.widgetId = widget.widget_id;
+
+            // 3. Buat Judul
+            const title = document.createElement('h3');
+            // Jika widget sensor_type adalah "suhu", tampilkan "Suhu" saja
+            if (widget.sensor_type.toLowerCase() === 'suhu') {
+                title.textContent = 'Suhu';
+            } else {
+                title.textContent = `${widget.sensor_type} (${widget.device_name})`;
+            }
+
+            // Masukkan Tombol Hapus & Judul ke Kotak Putih
+            widgetEl.appendChild(deleteButton);
+            widgetEl.appendChild(title);
+
+            let canvasId = null;
+
+            // === CARI NILAI TERBARU DARI SENSOR DATA ===
+            const latestSensorData = Array.isArray(allSensorData) ? 
+                allSensorData.filter(d => d.device_id === widget.device_id && d.sensor_type === widget.sensor_type) :
+                [];
+            const latestValue = latestSensorData.length > 0 ? 
+                latestSensorData[latestSensorData.length - 1].value : 
+                widget.current_value;
+
+            // --- LOGIKA KONTEN WIDGET BERDASARKAN TIPE ---
+
+            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+                // --- GRAPH & GAUGE ---
+                const canvas = document.createElement('canvas');
+                canvasId = `canvas-${widget.widget_id}`;
+                canvas.id = canvasId;
+                // Masukkan canvas ke Kotak Putih
+                widgetEl.appendChild(canvas);
+
+            } else if (widget.widget_type === 'toggle') {
+                // --- TOGGLE SWITCH ---
+                const widgetBody = document.createElement('div');
+                widgetBody.className = 'widget-body';
+                const isChecked = (latestValue === 'true' || latestValue === true || latestValue === 1 || latestValue === '1');
+                widgetBody.innerHTML = `
+                    <label class="switch">
+                        <input type="checkbox" 
+                               class="widget-toggle" 
+                               data-widget-id="${widget.widget_id}" 
+                               ${isChecked ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                `;
+                // Masukkan body toggle ke Kotak Putih
+                widgetEl.appendChild(widgetBody);
+
+            } else if (widget.widget_type === 'slider') {
+                const widgetBody = document.createElement('div');
+                widgetBody.className = 'widget-body';
+
+                const currentValue = parseInt(latestValue) || 0;
+
+                widgetBody.innerHTML = `
+                    <div style="width: 100%; padding: 0 10px; text-align: center;">
+                        <input type="range" min="0" max="255" value="${currentValue}" 
+                               class="widget-slider" 
+                               data-widget-id="${widget.widget_id}"
+                               style="width: 100%; cursor: pointer;">
+                        <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 1.2em;">
+                            <span id="val-display-${widget.widget_id}">${currentValue}</span>
+                        </p>
+                    </div>
+                `;
+
+                widgetEl.appendChild(widgetBody);
+            
+            } else if (widget.widget_type === 'number') {
+                // --- NUMBER DISPLAY ---
+                const widgetBody = document.createElement('div');
+                widgetBody.className = 'widget-body';
+                
+                const currentValue = latestValue !== undefined && latestValue !== null ? 
+                    (widget.data_type === 'integer' ? parseInt(latestValue) : parseFloat(latestValue)) : 
+                    0;
+
+                widgetBody.innerHTML = `
+                    <div style="width: 100%; text-align: center;">
+                        <p id="number-val-${widget.widget_id}" style="margin: 0; font-weight: bold; font-size: 3em; color: #007bff;">
+                            ${currentValue}
+                        </p>
+                    </div>
+                `;
+
+                widgetEl.appendChild(widgetBody);
+            }
+
+            // 4. Terakhir, tempel Kotak Putih (yang sudah lengkap) ke Dashboard Utama
+            dashboardContainer.appendChild(widgetEl);
+
+            // --- LOGIKA GAMBAR CHART (ASYNC) ---
+            // Hanya dijalankan jika widgetnya Graph atau Gauge
+            const widgetData = Array.isArray(allSensorData) ? allSensorData.filter(d =>
+                d.device_id === widget.device_id &&
+                d.sensor_type === widget.sensor_type
+            ) : [];
+
+            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+                // Gunakan setTimeout agar elemen canvas dirender dulu oleh browser
+                setTimeout(() => {
+                    try {
+                        if (widget.widget_type === 'graph') {
+                            drawGraph(canvasId, widgetData);
+                        } else if (widget.widget_type === 'gauge') {
+                            drawGauge(canvasId, widgetData, widget.data_type);
+                        }
+                    } catch (e) {
+                        console.error(`Error rendering widget ${widget.widget_id}:`, e);
+                    }
+                }, 0);
+            }
+        }
+        function drawGraph(canvasId, data) {
+            const canvasElement = document.getElementById(canvasId);
+            if (!canvasElement) { console.error(`Canvas ${canvasId} tidak ditemukan!`); return; }
+            const ctx = canvasElement.getContext('2d');
+            // Hancurkan chart lama jika ada untuk mencegah error
+            if (Chart.getChart(canvasId)) {
+                Chart.getChart(canvasId).destroy();
+            }
+            new Chart(ctx, {
+                type: 'line', data: {
+                    labels: data.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                    datasets: [{ label: 'Nilai Sensor', data: data.map(d => d.value), borderColor: '#007bff', fill: false, tension: 0.1 }]
+                }
+            });
+        }
+        function drawGauge(canvasId, data, dataType) {
+            const canvasElement = document.getElementById(canvasId);
+            if (!canvasElement) { console.error(`Canvas ${canvasId} tidak ditemukan!`); return; }
+            const ctx = canvasElement.getContext('2d');
+            // Hancurkan chart lama jika ada
+            if (Chart.getChart(canvasId)) {
+                Chart.getChart(canvasId).destroy();
+            }
+            const latestValue = data.length > 0 ? data[data.length - 1].value : 0;
+            const value = (dataType === 'integer') ? parseInt(latestValue) : parseFloat(latestValue);
+            const maxVal = 100; // Asumsi max 100
+            new Chart(ctx, {
+                type: 'doughnut', data: {
+                    labels: ['Value', 'Empty'],
+                    datasets: [{ data: [value, maxVal - value], backgroundColor: ['#007bff', '#e9ecef'], borderWidth: 0 }]
+                },
+                options: {
+                    rotation: 270, circumference: 180, cutout: '70%',
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    elements: { center: { text: `${value}`, color: '#333', fontStyle: 'bold', sidePadding: 20 } }
+                }
+            });
+        }
+        Chart.register({
+            id: 'gaugeCenterText',
+            beforeDraw: function (chart) {
+                if (chart.config.type === 'doughnut' && chart.options.elements.center) {
+                    const { center } = chart.options.elements;
+                    const ctx = chart.ctx;
+                    const { width, height } = chart;
+                    ctx.restore();
+                    const fontSize = (height / 114).toFixed(2);
+                    ctx.font = `${center.fontStyle || 'normal'} ${fontSize}em sans-serif`;
+                    ctx.textBaseline = 'middle';
+                    const text = center.text;
+                    const textX = Math.round((width - ctx.measureText(text).width) / 2);
+                    const textY = height / 1.5;
+                    ctx.fillStyle = center.color || '#000';
+                    ctx.fillText(text, textX, textY);
+                    ctx.save();
+                }
+            }
+        });
+
+
+        // --- (REAL-TIME) FUNGSI UNTUK UPDATE WIDGET DATA SENSOR ---
+        function updateWidgetData(data) {
+            const widgetToUpdate = allUserWidgets.find(w =>
+                w.device_id == data.device_id &&
+                w.sensor_type === data.sensor_type
+            );
+            if (!widgetToUpdate) return;
+
+            // Update untuk tipe 'graph'
+            if (widgetToUpdate.widget_type === 'graph') {
+                const canvasId = `canvas-${widgetToUpdate.widget_id}`;
+                const chart = Chart.getChart(canvasId);
+                if (!chart) return; // Chart belum ada atau sudah dihancurkan
+
+                chart.data.labels.push(new Date(data.timestamp).toLocaleTimeString());
+                chart.data.datasets[0].data.push(data.value);
+                if (chart.data.labels.length > 20) { // Limit history
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+                chart.update('none'); // Update tanpa animasi
+            }
+            
+            // Update untuk tipe 'gauge'
+            else if (widgetToUpdate.widget_type === 'gauge') {
+                const canvasId = `canvas-${widgetToUpdate.widget_id}`;
+                const chart = Chart.getChart(canvasId);
+                if (!chart) return;
+
+                const value = (widgetToUpdate.data_type === 'integer') ? parseInt(data.value) : parseFloat(data.value);
+                const maxVal = 100;
+                chart.data.datasets[0].data[0] = value;
+                chart.data.datasets[0].data[1] = maxVal - value;
+                chart.options.elements.center.text = `${value}`;
+                chart.update('none'); // Update tanpa animasi
+            }
+            
+            // Update untuk tipe 'number'
+            else if (widgetToUpdate.widget_type === 'number') {
+                const numberDisplayId = `number-val-${widgetToUpdate.widget_id}`;
+                const numberDisplay = document.getElementById(numberDisplayId);
+                if (!numberDisplay) return;
+                
+                const value = (widgetToUpdate.data_type === 'integer') ? 
+                    parseInt(data.value) : parseFloat(data.value);
+                numberDisplay.textContent = value;
+            }
+            
+            // Update untuk tipe 'slider'
+            else if (widgetToUpdate.widget_type === 'slider') {
+                const sliderDisplay = document.getElementById(`val-display-${widgetToUpdate.widget_id}`);
+                if (sliderDisplay) {
+                    const value = parseInt(data.value) || 0;
+                    sliderDisplay.textContent = value;
+                }
+            }
+            
+            // Update untuk tipe 'toggle'
+            else if (widgetToUpdate.widget_type === 'toggle') {
+                const toggleInput = document.querySelector(`input.widget-toggle[data-widget-id="${widgetToUpdate.widget_id}"]`);
+                if (toggleInput) {
+                    const isTrue = (data.value === 'true' || data.value === true || data.value === 1 || data.value === '1');
+                    toggleInput.checked = isTrue;
+                }
+            }
+        }
+
+
+        // --- EVENT LISTENERS ---
+
+        // 0. Mulai!
+        // 0. Mulai!
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // 1. ASSIGN VARIABEL DOM SETELAH LOAD
+            dashboardContainer = document.getElementById('dashboard-container');
+            activeDeviceSelect = document.getElementById('activeDeviceSelect');
+            deviceList = document.getElementById('deviceList');
+            showWidgetFormButton = document.getElementById('showWidgetFormButton');
+            widgetFormContainer = document.getElementById('widgetFormContainer');
+            widgetFormTitle = document.getElementById('widgetFormTitle');
+            downloadCsvButton = document.getElementById('downloadCsvButton');
+
+            // (BARU) Tombol Share
+            // Pastikan Anda sudah menambahkan <button id="shareDeviceButton"...> di HTML-nya
+            const shareDeviceButton = document.getElementById('shareDeviceButton');
+
+            // 2. Muat data awal
+            loadInitialData();
+
+            // 3. Pasang semua event listener
+
+            // A. Ganti Perangkat Aktif
+            activeDeviceSelect.addEventListener('change', (e) => {
+                displayWidgetsForDevice(e.target.value);
+            });
+
+            // B. Logout
+            document.getElementById('logoutButton').addEventListener('click', () => {
+                localStorage.removeItem('iot_token');
+                window.location.href = 'login.html';
+            });
+
+            // C. Submit Form Registrasi Device
+            document.getElementById('deviceForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const deviceName = document.getElementById('device_name').value;
+                const deviceSuccessResult = document.getElementById('deviceSuccessResult');
+                const newDeviceName = document.getElementById('newDeviceName');
+                const newSecretKey = document.getElementById('newSecretKey');
+                try {
+                    const data = await fetchWithAuth(`${API_BASE}/api/devices`, {
+                        method: 'POST', body: JSON.stringify({ device_name: deviceName })
+                    });
+                    newDeviceName.textContent = deviceName;
+                    newSecretKey.textContent = data.secret_key || '(secret key tidak tersedia)';
+                    deviceSuccessResult.style.display = 'block';
+                    document.getElementById('deviceForm').reset();
+                    allUserDevices = await fetchWithAuth(`${API_BASE}/api/devices`);
+                    populateDeviceLists(allUserDevices);
+                } catch (error) {
+                    alert(error.message);
+                }
+            });
+
+            // C.1 Copy Secret Key Button
+            document.addEventListener('click', (e) => {
+                if (e.target.id === 'copySecretKeyButton') {
+                    const secretKey = document.getElementById('newSecretKey').textContent;
+                    navigator.clipboard.writeText(secretKey).then(() => {
+                        const btn = e.target;
+                        const originalText = btn.textContent;
+                        btn.textContent = '✓ Copied!';
+                        btn.style.background = '#28a745';
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                            btn.style.background = '#42b72a';
+                        }, 2000);
+                    }).catch(err => {
+                        alert('Gagal copy. Silakan copy manual.');
+                    });
+                }
+            });
+
+            // D. Tampilkan/Sembunyikan Form Widget
+            showWidgetFormButton.addEventListener('click', () => {
+                const isHidden = widgetFormContainer.style.display === 'none';
+                widgetFormContainer.style.display = isHidden ? 'block' : 'none';
+            });
+
+            // E. Submit Form Tambah Widget
+            document.getElementById('widgetForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const selectedDeviceId = activeDeviceSelect.value;
+                if (!selectedDeviceId) { alert('Pilih perangkat aktif!'); return; }
+                const payload = {
+                    device_id: selectedDeviceId,
+                    sensor_type: document.getElementById('sensorType').value,
+                    widget_type: document.getElementById('widgetType').value,
+                    data_type: document.getElementById('dataType').value
+                };
+                try {
+                    await fetchWithAuth(`${API_BASE}/api/widgets`, {
+                        method: 'POST', body: JSON.stringify(payload)
+                    });
+                    alert('Widget berhasil dibuat!');
+                    document.getElementById('widgetForm').reset();
+                    widgetFormContainer.style.display = 'none';
+                    allUserWidgets = await fetchWithAuth(`${API_BASE}/api/widgets`);
+                    allSensorData = await fetchWithAuth(`${API_BASE}/api/data`); // Refresh data juga
+                    displayWidgetsForDevice(selectedDeviceId);
+                } catch (error) {
+                    alert(error.message);
+                }
+            });
+
+            // F. Hapus Perangkat (di List)
+            document.getElementById('deviceListContainer').addEventListener('click', async (e) => {
+                if (e.target.classList.contains('btn-delete')) {
+                    const deviceId = e.target.dataset.deviceId;
+                    if (!confirm('YAKIN menghapus perangkat ini? \nSEMUA widget dan data sensor yang terkait akan HILANG SELAMANYA.')) return;
+                    try {
+                        await fetchWithAuth(`${API_BASE}/api/devices/${deviceId}`, { method: 'DELETE' });
+                        alert('Perangkat berhasil dihapus.');
+                        await loadInitialData();
+                        displayWidgetsForDevice(null);
+                    } catch (error) {
+                        alert(error.message);
+                    }
+                }
+            });
+
+            // G. Hapus Widget (di Dashboard)
+            dashboardContainer.addEventListener('click', async (e) => {
+                if (e.target.classList.contains('widget-delete')) {
+                    const widgetId = e.target.dataset.widgetId;
+                    if (!confirm('Yakin ingin menghapus widget ini?')) return;
+                    try {
+                        await fetchWithAuth(`${API_BASE}/api/widgets/${widgetId}`, { method: 'DELETE' });
+                        alert('Widget berhasil dihapus.');
+                        const selectedDeviceId = activeDeviceSelect.value;
+                        allUserWidgets = await fetchWithAuth(`${API_BASE}/api/widgets`);
+                        displayWidgetsForDevice(selectedDeviceId);
+                    } catch (error) {
+                        alert(error.message);
+                    }
+                }
+            });
+
+            // H. Kontrol Toggle Switch & Slider (Kirim Perintah ke Server)
+            dashboardContainer.addEventListener('change', (e) => {
+                // 1. Handle Toggle
+                if (e.target.classList.contains('widget-toggle')) {
+                    const widgetId = e.target.dataset.widgetId;
+                    const newState = e.target.checked ? 'true' : 'false';
+                    
+                    // Cari widget
+                    const widget = allUserWidgets.find(w => w.widget_id == widgetId);
+                    if (!widget) return;
+                    
+                    console.log(`📤 Toggle "${widget.sensor_type}": ${newState}`);
+                    
+                    // Format JSON untuk WebSocket Tunneling
+                    const command = {
+                        device_id: widget.device_id,      // Device ID
+                        var: widget.sensor_type,
+                        val: newState
+                    };
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify(command));
+                        widget.current_value = newState;
+                    } else {
+                        console.error('⚠️ WebSocket tidak terhubung');
+                    }
+                }
+
+                // 2. Handle Slider
+                if (e.target.classList.contains('widget-slider')) {
+                    const widgetId = e.target.dataset.widgetId;
+                    const newValue = e.target.value;
+
+                    // Update display angka
+                    const display = document.getElementById(`val-display-${widgetId}`);
+                    if (display) display.textContent = newValue;
+
+                    // Cari widget
+                    const widget = allUserWidgets.find(w => w.widget_id == widgetId);
+                    if (!widget) return;
+                    
+                    console.log(`📤 Slider "${widget.sensor_type}": ${newValue}`);
+                    
+                    // Format JSON untuk WebSocket Tunneling
+                    const command = {
+                        device_id: widget.device_id,      // Device ID
+                        var: widget.sensor_type,
+                        val: newValue
+                    };
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify(command));
+                        widget.current_value = newValue;
+                    } else {
+                        console.error('⚠️ WebSocket tidak terhubung');
+                    }
+                }
+            });
+
+            // Opsional: Update angka display saat slider digeser (sebelum dilepas)
+            dashboardContainer.addEventListener('input', (e) => {
+                if (e.target.classList.contains('widget-slider')) {
+                    const widgetId = e.target.dataset.widgetId;
+                    const display = document.getElementById(`val-display-${widgetId}`);
+                    if (display) display.textContent = e.target.value;
+                }
+            });
+
+            // I. Download CSV
+            if (downloadCsvButton) {
+                downloadCsvButton.addEventListener('click', downloadDeviceDataAsCSV);
+            }
+
+            // J. (BARU) Share Link
+            // J. (DIPERBAIKI) Share Link (Cek dulu sebelum buat baru)
+            if (shareDeviceButton) {
+                shareDeviceButton.addEventListener('click', async () => {
+                    const selectedDeviceId = activeDeviceSelect.value;
+                    if (!selectedDeviceId) return;
+
+                    // 1. Cari data perangkat di memori lokal
+                    const device = allUserDevices.find(d => d.device_id == selectedDeviceId);
+
+                    // 2. Cek apakah sudah punya public_slug
+                    if (device && device.public_slug) {
+                        // JIKA SUDAH ADA: Langsung tampilkan link-nya
+                        const fullUrl = `${API_BASE}/${device.public_slug}`;
+                        prompt("Link Publik SUDAH ADA. Silakan salin:", fullUrl);
+                        return; // Berhenti di sini, jangan minta input baru
+                    }
+
+                    // 3. JIKA BELUM ADA: Minta input nama custom
+                    let customName = prompt("Link belum ada. Masukkan nama unik (contoh: kebunku):");
+
+                    if (customName) {
+                        // Bersihkan spasi dan karakter aneh
+                        customName = customName.replace(/[^a-zA-Z0-9-_]/g, '');
+
+                        try {
+                            const response = await fetchWithAuth(`${API_BASE}/api/devices/share`, {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    device_id: selectedDeviceId,
+                                    custom_slug: customName
+                                })
+                            });
+
+                            // Update data lokal agar kalau diklik lagi tidak minta input
+                            device.public_slug = customName;
+
+                            // Tampilkan Link
+                            const fullUrl = `${API_BASE}${response.url}`;
+                            prompt("Link Publik Berhasil Dibuat! Silakan salin:", fullUrl);
+
+                        } catch (error) {
+                            alert("Gagal membuat link: " + error.message);
+                        }
+                    }
+                });
+            }
+        }); // <-- TUTUP Kurung kurawal DOMContentLoaded
+    </script>
+</body>
+
+</html>
