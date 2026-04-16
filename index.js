@@ -285,9 +285,10 @@ app.post('/api/devices', autentikasiToken, (req, res) => {
         return res.status(400).json({ message: 'Nama perangkat wajib diisi' });
     }
     
+    const apiKey = generateSecretKey();
     const secretKey = generateSecretKey();
     const query = 'INSERT INTO devices (user_id, device_name, api_key, secret_key) VALUES (?, ?, ?, ?)';
-    db.run(query, [userId, device_name, '', secretKey], function(err) {
+    db.run(query, [userId, device_name, apiKey, secretKey], function(err) {
         if (err) {
             console.error('Error registering device:', err);
             return res.status(500).json({ message: 'Gagal mendaftarkan device' });
@@ -299,12 +300,13 @@ app.post('/api/devices', autentikasiToken, (req, res) => {
             device_name: device_name,
             user_id: userId
         });
-        console.log(`✓ Device criado: "${device_name}" com secret_key: ${secretKey}`);
+        console.log(`✓ Device criado: "${device_name}" com api_key: ${apiKey} secret_key: ${secretKey}`);
         
         res.status(201).json({ 
             message: 'Device berhasil terdaftar', 
             device_id: this.lastID, 
             device_name: device_name,
+            api_key: apiKey,
             secret_key: secretKey 
         });
     });
