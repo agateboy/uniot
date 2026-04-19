@@ -617,6 +617,18 @@ wss.on('connection', (ws, req) => {
                             console.error('Error updating widget current_value:', err);
                         } else {
                             console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
+                            
+                            // Broadcast ke public view jika device ini memiliki public slug
+                            db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
+                                if (!err && deviceRow && deviceRow.public_slug) {
+                                    broadcastToPublicView(deviceRow.public_slug, {
+                                        type: 'dataUpdate',
+                                        sensor_type: sensor_type,
+                                        current_value: value,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            });
                         }
                     }
                 );
@@ -642,6 +654,45 @@ wss.on('connection', (ws, req) => {
                 
                 console.log(`[Dashboard User ${userId}] 📥 Perintah untuk device ${device_id}: ${sensor_type} = ${value}`);
                 
+                // ===== SAVE KE DATABASE (PENTING!) =====
+                // Update widget current_value & simpan ke sensor_data
+                db.run(
+                    'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
+                    [value, device_id, sensor_type],
+                    (err) => {
+                        if (err) {
+                            console.error('Error updating widget from dashboard control:', err);
+                        } else {
+                            console.log(`[✓ Database] Widget updated dari dashboard: ${sensor_type} = ${value}`);
+                        }
+                    }
+                );
+
+                // Simpan ke sensor_data juga (history)
+                db.run(
+                    'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
+                    [device_id, sensor_type, value],
+                    (err) => {
+                        if (err) {
+                            console.error('Kesalahan saat menyimpan sensor data dari dashboard:', err);
+                        } else {
+                            console.log(`[✓ Database] Sensor data saved from dashboard: device ${device_id}, ${sensor_type} = ${value}`);
+                            
+                            // Broadcast ke public view jika device ini memiliki public slug
+                            db.get('SELECT public_slug FROM devices WHERE device_id = ?', [device_id], (err, deviceRow) => {
+                                if (!err && deviceRow && deviceRow.public_slug) {
+                                    broadcastToPublicView(deviceRow.public_slug, {
+                                        type: 'dataUpdate',
+                                        sensor_type: sensor_type,
+                                        current_value: value,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            });
+                        }
+                    }
+                );
+                
                 // Cari koneksi device yang terauthentikasi (gunakan == untuk loose equality)
                 const deviceKeyEntry = Array.from(allConnections.entries()).find(
                     ([key, connectionData]) => connectionData.type === 'device' && connectionData.deviceId == device_id && connectionData.authStatus === 'authenticated'
@@ -655,14 +706,14 @@ wss.on('connection', (ws, req) => {
                     // Send ACK ke dashboard
                     ws.send(JSON.stringify({ status: 'ack', device_id, var: sensor_type, val: value }));
                 } else {
-                    console.log(`[✗ Device] ID ${device_id} tidak terhubung`);
+                    console.log(`[✗ Device] ID ${device_id} tidak terhubung, tapi nilai sudah disimpan di database`);
                     console.log(`[DEBUG] Koneksi device yang tersedia:`);
                     allConnections.forEach((conn, key) => {
                         if (conn.type === 'device') {
                             console.log(`  - Device ${conn.deviceId} (authenticated: ${conn.authStatus === 'authenticated'}, connected: ${conn.ws.readyState === WebSocket.OPEN})`);
                         }
                     });
-                    ws.send(JSON.stringify({ status: 'error', message: `Device ${device_id} tidak terhubung` }));
+                    ws.send(JSON.stringify({ status: 'ack', device_id, var: sensor_type, val: value, message: 'Nilai disimpan (device offline)' }));
                 }
             }
             
@@ -948,7 +999,64 @@ app.get('/api/public/view/:slug', (req, res) => {
     });
 });
 
-// --- Jalankan Server ---
+// Storage untuk SSE clients (Server-Sent Events untuk public view)
+const publicViewClients = new Map(); // Map<slug, Set<response objects>>
+
+// --- SERVER-SENT EVENTS (SSE) ENDPOINT UNTUK PUBLIC VIEW ---
+app.get('/api/public/updates/:slug', (req, res) => {
+    const slug = req.params.slug;
+    
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    // Verifikasi slug valid
+    db.get('SELECT device_id FROM devices WHERE public_slug = ?', [slug], (err, device) => {
+        if (err || !device) {
+            res.write(`data: {"error": "Invalid slug"}\n\n`);
+            res.end();
+            return;
+        }
+        
+        // Tambahkan client ke tracking
+        if (!publicViewClients.has(slug)) {
+            publicViewClients.set(slug, new Set());
+        }
+        publicViewClients.get(slug).add(res);
+        
+        console.log(`[SSE] Client terhubung untuk slug: ${slug}`);
+        
+        // Kirim initial message
+        res.write(`: SSE connection established\n\n`);
+        
+        // Handle disconnect
+        req.on('close', () => {
+            console.log(`[SSE] Client disconnect untuk slug: ${slug}`);
+            publicViewClients.get(slug).delete(res);
+        });
+    });
+});
+
+// --- FUNGSI BROADCAST UPDATE KE PUBLIC VIEW CLIENTS ---
+function broadcastToPublicView(slug, data) {
+    if (!publicViewClients.has(slug)) return;
+    
+    const clients = publicViewClients.get(slug);
+    const message = `data: ${JSON.stringify(data)}\n\n`;
+    
+    clients.forEach(client => {
+        try {
+            client.write(message);
+        } catch (err) {
+            console.error('[SSE] Error writing to client:', err.message);
+            clients.delete(client);
+        }
+    });
+}
+
+// --- JALANKAN SERVER ---
 server.listen(port, '0.0.0.0', () => {
     console.log(`Server (Express + WebSocket) berjalan di http://localhost:${port}`);
     console.log(`Akses dari jaringan lokal: http://${localIp}:${port}`);

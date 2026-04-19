@@ -25,7 +25,6 @@
         input[type=range][disabled] { opacity: 0.8; cursor: not-allowed; width: 100%; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <h1 id="pageTitle">Memuat Data...</h1>
@@ -37,6 +36,29 @@
         const slug = pathSegments[pathSegments.length - 1];
 
         window.publicCharts = {};
+        let eventSource = null;
+
+        // Register Chart.js plugin untuk gauge center text
+        Chart.register({
+            id: 'gaugeCenterText',
+            beforeDraw: function (chart) {
+                if (chart.config.type === 'doughnut' && chart.options.elements.center) {
+                    const { center } = chart.options.elements;
+                    const ctx = chart.ctx;
+                    const { width, height } = chart;
+                    ctx.restore();
+                    const fontSize = (height / 114).toFixed(2);
+                    ctx.font = `${center.fontStyle || 'normal'} ${fontSize}em sans-serif`;
+                    ctx.textBaseline = 'middle';
+                    const text = center.text;
+                    const textX = Math.round((width - ctx.measureText(text).width) / 2);
+                    const textY = height / 1.5;
+                    ctx.fillStyle = center.color || '#000';
+                    ctx.fillText(text, textX, textY);
+                    ctx.save();
+                }
+            }
+        });
 
         async function loadData() {
             try {
@@ -46,124 +68,282 @@
                 const result = await response.json();
                 document.getElementById('pageTitle').textContent = result.device_name;
                 renderWidgets(result.widgets, result.data);
-                setupSocket();
+                
+                // Mulai mendengarkan SSE untuk real-time updates
+                if (!eventSource) {
+                    setupSSE();
+                }
             } catch (error) {
                 document.body.innerHTML = `<h1>404</h1><p>${error.message}</p>`;
             }
         }
 
-        function renderWidgets(widgets, data) {
-            const container = document.getElementById('dashboard-container');
-            container.innerHTML = ''; 
-
-            widgets.forEach(w => {
-                const div = document.createElement('div');
-                div.dataset.sensorType = w.sensor_type;
-                div.className = 'widget';
-                div.innerHTML = `<h3>${w.sensor_type}</h3><div class="widget-content"></div>`;
-                const contentDiv = div.querySelector('.widget-content');
-                
-                const widgetData = data.filter(d => d.sensor_type === w.sensor_type);
-
-                if (w.widget_type === 'graph') {
-                    // --- GRAPH ---
-                    const canvas = document.createElement('canvas');
-                    contentDiv.appendChild(canvas);
-                    container.appendChild(div);
-                    const chart = new Chart(canvas, {
-                        type: 'line',
-                        data: {
-                            labels: widgetData.map(d => new Date(d.timestamp).toLocaleTimeString()),
-                            datasets: [{ label: w.sensor_type, data: widgetData.map(d => d.value), borderColor: '#007bff', tension: 0.1 }]
-                        }
-                    });
-                    window.publicCharts[w.sensor_type] = chart;
-
-                } else if (w.widget_type === 'toggle') {
-                    // --- TOGGLE (Status Only) ---
-                    const isOn = (w.current_value === 'true');
-                    contentDiv.innerHTML = `<span class="status-badge ${isOn ? 'on' : 'off'}">${isOn ? 'NYALA' : 'MATI'}</span>`;
-                    container.appendChild(div);
-
-                } else if (w.widget_type === 'slider') {
-                    // --- SLIDER (Read Only) ---
-                    // PERBAIKAN: Ambil nilai dari current_value, bukan widgetData
-                    const val = parseInt(w.current_value) || 0;
+        function setupSSE() {
+            eventSource = new EventSource(`/api/public/updates/${slug}`);
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
                     
-                    contentDiv.innerHTML = `
-                        <div class="slider-container">
-                            <span class="slider-val">${val}</span>
-                            <input type="range" min="0" max="255" value="${val}" disabled>
-                        </div>
-                    `;
-                    container.appendChild(div);
+                    if (message.type === 'dataUpdate') {
+                        console.log(`[🔄 SSE Update] ${message.sensor_type} = ${message.current_value}`);
+                        
+                        // Update nilai di widget yang sesuai
+                        const div = document.querySelector(`[data-sensor-type="${message.sensor_type}"]`);
+                        if (!div) return;
+                        
+                        const contentDiv = div.querySelector('.widget-content');
+                        const widgetType = div.dataset.widgetType;
+                        
+                        // Update berdasarkan tipe widget
+                        if (widgetType === 'toggle') {
+                            const isOn = (message.current_value === 'true');
+                            const badge = contentDiv.querySelector('.status-badge');
+                            if (badge) {
+                                badge.classList.toggle('on', isOn);
+                                badge.classList.toggle('off', !isOn);
+                                badge.textContent = isOn ? 'NYALA' : 'MATI';
+                            }
+                        } else if (widgetType === 'slider') {
+                            const sliderValText = contentDiv.querySelector('.slider-val');
+                            const sliderInput = contentDiv.querySelector('input[type="range"]');
+                            if (sliderValText) sliderValText.textContent = message.current_value;
+                            if (sliderInput) sliderInput.value = message.current_value;
+                        } else if (widgetType === 'gauge') {
+                            const canvas = contentDiv.querySelector('canvas');
+                            if (canvas) {
+                                const value = parseInt(message.current_value) || 0;
+                                const chart = Chart.getChart(canvas.id);
+                                if (chart) {
+                                    chart.data.datasets[0].data[0] = value;
+                                    chart.data.datasets[0].data[1] = 100 - value;
+                                    chart.update();
+                                }
+                            }
+                        } else if (widgetType === 'graph') {
+                            const currentValDiv = contentDiv.querySelector('.current-value');
+                            if (currentValDiv) {
+                                currentValDiv.innerHTML = `<strong>Current:</strong> ${message.current_value}`;
+                            }
+                            
+                            // Update chart juga
+                            const chart = window.publicCharts[message.sensor_type];
+                            if (chart) {
+                                const now = new Date().toLocaleTimeString();
+                                chart.data.labels.push(now);
+                                chart.data.datasets[0].data.push(message.current_value);
+                                
+                                // Limit ke 40 data points terakhir
+                                if (chart.data.labels.length > 40) {
+                                    chart.data.labels.shift();
+                                    chart.data.datasets[0].data.shift();
+                                }
+                                chart.update();
+                            }
+                        } else {
+                            // Text/Number
+                            const valText = contentDiv.querySelector('.tv-val');
+                            if (valText) valText.textContent = message.current_value;
+                        }
+                    }
+                } catch (e) {
+                    console.error('SSE message parse error:', e);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE connection error:', error);
+                eventSource.close();
+                eventSource = null;
+                // Reconnect dalam 3 detik
+                setTimeout(setupSSE, 3000);
+            };
+        }
 
-                } else {
-                    // --- GAUGE / TEXT LAINNYA ---
-                    const val = widgetData.length > 0 ? widgetData[widgetData.length-1].value : '-';
-                    contentDiv.innerHTML = `<h1 class="tv-val">${val}</h1>`;
-                    container.appendChild(div);
+        // --- FUNGSI RENDER GAUGE (sama seperti dashboard) ---
+        function renderGaugeChart(canvasId, value, dataType) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) {
+                console.error(`Canvas ${canvasId} tidak ditemukan!`);
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            const finalValue = (dataType === 'integer') ? parseInt(value) : parseFloat(value);
+            const maxVal = 100;
+            
+            // Destroy old chart if exists
+            const oldChart = Chart.getChart(canvasId);
+            if (oldChart) oldChart.destroy();
+            
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Value', 'Empty'],
+                    datasets: [{
+                        data: [finalValue, maxVal - finalValue],
+                        backgroundColor: ['#007bff', '#e9ecef'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    rotation: 270,
+                    circumference: 180,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
+                    elements: {
+                        center: {
+                            text: `${finalValue}`,
+                            color: '#333',
+                            fontStyle: 'bold',
+                            sidePadding: 20
+                        }
+                    }
                 }
             });
         }
 
-        let socket = null;
-        function setupSocket() {
-            if (socket) return; 
-            socket = io({ auth: { slug } });
+        function renderWidgets(widgets, data) {
+            const container = document.getElementById('dashboard-container');
+            
+            // Jika belum ada widget sama sekali, clear & render baru
+            if (container.children.length === 0) {
+                container.innerHTML = '';
+            }
 
-            // Listener untuk update state (Toggle & Slider)
-            socket.on('publicWidgetUpdated', (update) => {
-                try {
-                    const { sensor_type, current_value } = update;
-                    const el = document.querySelector(`[data-sensor-type="${sensor_type}"]`);
-                    if (!el) return;
+            widgets.forEach(w => {
+                let div = document.querySelector(`[data-sensor-type="${w.sensor_type}"]`);
+                
+                // Jika widget belum ada, buat baru
+                if (!div) {
+                    div = document.createElement('div');
+                    div.dataset.sensorType = w.sensor_type;
+                    div.dataset.widgetType = w.widget_type;
+                    div.className = 'widget';
+                    div.innerHTML = `<h3>${w.sensor_type}</h3><div class="widget-content"></div>`;
+                    container.appendChild(div);
+                }
+                
+                const contentDiv = div.querySelector('.widget-content');
+                const widgetData = data.filter(d => d.sensor_type === w.sensor_type);
 
-                    // Update Toggle
-                    const badge = el.querySelector('.status-badge');
-                    if (badge) {
-                        const isOn = (current_value === 'true');
-                        badge.classList.toggle('on', isOn);
-                        badge.classList.toggle('off', !isOn);
-                        badge.textContent = isOn ? 'NYALA' : 'MATI';
-                    }
-
-                    // Update Slider (BARU)
-                    const sliderInput = el.querySelector('input[type="range"]');
-                    const sliderValText = el.querySelector('.slider-val');
-                    if (sliderInput && sliderValText) {
-                        sliderInput.value = current_value;
-                        sliderValText.textContent = current_value;
-                    }
-
-                } catch (e) { console.error('publicWidgetUpdated handler error', e); }
-            });
-
-            // Listener untuk data sensor baru (Graph & Text)
-            socket.on('publicNewData', (d) => {
-                try {
-                    const { sensor_type, value, timestamp } = d;
+                if (w.widget_type === 'graph') {
+                    // --- GRAPH ---
+                    let canvas = contentDiv.querySelector('canvas');
+                    let currentValDiv = contentDiv.querySelector('.current-value');
                     
-                    // Update Chart
-                    const chart = window.publicCharts[sensor_type];
-                    if (chart) {
-                        chart.data.labels.push(new Date(timestamp).toLocaleTimeString());
-                        chart.data.datasets[0].data.push(value);
-                        if (chart.data.labels.length > 40) {
-                            chart.data.labels.shift();
-                            chart.data.datasets[0].data.shift();
+                    if (!canvas) {
+                        currentValDiv = document.createElement('div');
+                        currentValDiv.className = 'current-value';
+                        contentDiv.appendChild(currentValDiv);
+                        
+                        canvas = document.createElement('canvas');
+                        contentDiv.appendChild(canvas);
+                        
+                        const chart = new Chart(canvas, {
+                            type: 'line',
+                            data: {
+                                labels: widgetData.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                                datasets: [{ label: w.sensor_type, data: widgetData.map(d => d.value), borderColor: '#007bff', tension: 0.1 }]
+                            }
+                        });
+                        window.publicCharts[w.sensor_type] = chart;
+                    } else {
+                        // Update chart yang sudah ada
+                        const chart = window.publicCharts[w.sensor_type];
+                        if (chart) {
+                            chart.data.labels = widgetData.map(d => new Date(d.timestamp).toLocaleTimeString());
+                            chart.data.datasets[0].data = widgetData.map(d => d.value);
+                            chart.update();
                         }
-                        chart.update();
+                    }
+                    
+                    // Update current value
+                    if (currentValDiv) {
+                        currentValDiv.innerHTML = `<strong>Current:</strong> ${w.current_value || '-'}`;
                     }
 
-                    // Update Text Value
-                    const valEl = document.querySelector(`[data-sensor-type="${sensor_type}"] .tv-val`);
-                    if (valEl) valEl.textContent = value;
+                } else if (w.widget_type === 'toggle') {
+                    // --- TOGGLE (Status Only) ---
+                    const isOn = (w.current_value === 'true');
+                    let badge = contentDiv.querySelector('.status-badge');
+                    
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'status-badge';
+                        contentDiv.innerHTML = '';
+                        contentDiv.appendChild(badge);
+                    }
+                    
+                    badge.classList.toggle('on', isOn);
+                    badge.classList.toggle('off', !isOn);
+                    badge.textContent = isOn ? 'NYALA' : 'MATI';
 
-                } catch (e) { console.error('publicNewData handler error', e); }
+                } else if (w.widget_type === 'slider') {
+                    // --- SLIDER (Read Only) ---
+                    const val = parseInt(w.current_value) || 0;
+                    let sliderContainer = contentDiv.querySelector('.slider-container');
+                    
+                    if (!sliderContainer) {
+                        contentDiv.innerHTML = `
+                            <div class="slider-container">
+                                <span class="slider-val">${val}</span>
+                                <input type="range" min="0" max="255" value="${val}" disabled>
+                            </div>
+                        `;
+                    } else {
+                        // Update slider value
+                        const sliderValText = sliderContainer.querySelector('.slider-val');
+                        const sliderInput = sliderContainer.querySelector('input[type="range"]');
+                        if (sliderValText) sliderValText.textContent = val;
+                        if (sliderInput) sliderInput.value = val;
+                    }
+
+                } else if (w.widget_type === 'gauge') {
+                    // --- GAUGE (Speedometer) ---
+                    let canvas = contentDiv.querySelector('canvas');
+                    
+                    if (!canvas) {
+                        contentDiv.innerHTML = '';
+                        canvas = document.createElement('canvas');
+                        canvas.id = `gauge-${w.sensor_type}`;
+                        contentDiv.appendChild(canvas);
+                        
+                        // Render gauge chart
+                        const value = parseInt(w.current_value) || 0;
+                        renderGaugeChart(canvas.id, value, w.data_type);
+                    } else {
+                        // Update gauge saat ada perubahan data
+                        const value = parseInt(w.current_value) || 0;
+                        const chart = Chart.getChart(canvas.id);
+                        if (chart) {
+                            chart.data.datasets[0].data[0] = value;
+                            chart.data.datasets[0].data[1] = 100 - value;
+                            chart.update();
+                        }
+                    }
+
+                } else {
+                    // --- NUMBER / TEXT LAINNYA ---
+                    let valText = contentDiv.querySelector('.tv-val');
+                    const val = w.current_value || (widgetData.length > 0 ? widgetData[widgetData.length-1].value : '-');
+                    
+                    if (!valText) {
+                        valText = document.createElement('h1');
+                        valText.className = 'tv-val';
+                        contentDiv.innerHTML = '';
+                        contentDiv.appendChild(valText);
+                    }
+                    
+                    valText.textContent = val;
+                }
             });
         }
 
+        // Ambil data awal dan tampilkan
         loadData();
     </script>
 </body>

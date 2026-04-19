@@ -482,15 +482,10 @@
                         allSensorData.push(dataWithDeviceId);
                         console.log(`[✓] Data tersimpan: ${dataWithDeviceId.device_name} - ${data.var} = ${data.val}`);
                         
-                        // Update widget jika device ini sedang dipilih
-                        const selectedDeviceId = activeDeviceSelect.value;
-                        if (selectedDeviceId) {
-                            const selectedDevice = allUserDevices.find(d => d.device_id == selectedDeviceId);
-                            if (selectedDevice && selectedDevice.device_name === data.device) {
-                                updateWidgetData(dataWithDeviceId);
-                                console.log(`[✓] Widget updated untuk device ${selectedDeviceId}`);
-                            }
-                        }
+                        // Trigger refresh untuk semua widget dari data baru ini
+                        refreshWidgetData();
+                        
+                        return;
                     }
                 } catch (error) {
                     console.error('JSON parse error:', error);
@@ -593,6 +588,23 @@
             } catch (error) {
                 console.error("Terjadi error di loadInitialData:", error.message);
                 dashboardContainer.innerHTML = `<p style="color: red;">Gagal memuat data awal. ${error.message}. Coba refresh (F5).</p>`;
+            }
+        }
+
+        // --- REFRESH DATA WIDGET & SENSOR (dipanggil saat ada perubahan dari WebSocket) ---
+        async function refreshWidgetData() {
+            try {
+                allUserWidgets = await fetchWithAuth(`${API_BASE}/api/widgets`) || [];
+                allSensorData = await fetchWithAuth(`${API_BASE}/api/data`) || [];
+                console.log(`[🔄 Update] Widget: ${allUserWidgets.length}, Data: ${allSensorData.length}`);
+                
+                // Re-render widget yang sedang ditampilkan
+                const selectedDeviceId = activeDeviceSelect.value;
+                if (selectedDeviceId) {
+                    displayWidgetsForDevice(selectedDeviceId);
+                }
+            } catch (error) {
+                console.error("Error di refreshWidgetData:", error.message);
             }
         }
 
