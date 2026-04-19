@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; }
+        body { 
+            background-color: #222; 
+            color: #0f0; 
+            font-family: monospace; 
+            font-size: 12px; 
+            padding: 10px;
+            overflow-x: hidden;
+        }
+        #log { 
+            height: 300px; 
+            overflow-y: auto; 
+            border: 1px solid #0f0;
+            padding: 10px;
+            background: #111;
+            margin-top: 10px;
+        }
+        .error { color: #f00; }
+        .success { color: #0f0; }
+        .info { color: #0ff; }
+        .warn { color: #ff0; }
+        b { display: block; margin-top: 10px; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <b>Websocket Serial Log (v2.0)</b><br>
+    <div id="log"></div>
+
+    <script>
+        var ws;
+        var logDiv = document.getElementById("log");
+        var messageQueue = [];
+        var connectionStatus = "IDLE";
+        
+        // Fungsi untuk mencetak tulisan ke layar HP dengan timestamp
+        function printLog(pesan, tipe = 'normal') { 
+            var timestamp = new Date().toLocaleTimeString();
+            var className = tipe === 'error' ? 'error' : 
+                           tipe === 'success' ? 'success' : 
+                           tipe === 'info' ? 'info' : 
+                           tipe === 'warn' ? 'warn' : '';
+            
+            var html = '<span class="' + className + '">[' + timestamp + '] ' + pesan + '</span>';
+            logDiv.innerHTML = html + "<br>" + logDiv.innerHTML;
+            
+            // Limit log entries
+            if (logDiv.children.length > 100) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+
+        // Fungsi untuk mengirim pesan ke App Inventor
+        function sendToApp(data) {
+            try {
+                // Tambahkan unique key untuk App Inventor tidak skip message yang sama
+                var uniqueKey = "|" + Date.now() + ":" + Math.random();
+                var message = data + uniqueKey;
+                window.AppInventor.setWebViewString(message);
+                console.log("Sent to App: " + message);
+            } catch (e) {
+                printLog("ERROR sending to App: " + e.message, 'error');
+            }
+        }
+
+        // Fungsi untuk handle pesan masuk dari server
+        function handleServerMessage(event) {
+            try {
+                var rawData = event.data;
+                printLog("<-- RX: " + rawData.substring(0, 100), 'info');
+                
+                // Parse JSON dari server
+                var json = JSON.parse(rawData);
+                
+                // Handle berbagai tipe respons dari server
+                if (json.status === 'success' || json.status === 'ack') {
+                    // ACK atau respons sukses
+                    printLog("✓ " + json.message, 'success');
+                    sendToApp("ACK:" + rawData);
+                } 
+                else if (json.status === 'error') {
+                    // Error dari server
+                    printLog("✗ ERROR: " + json.message, 'error');
+                    sendToApp("ERROR:" + rawData);
+                }
+                else if (json.type === 'dataUpdate') {
+                    // Data update dari device lain atau server
+                    printLog("DATA UPDATE: " + json.sensor_type + " = " + json.value, 'warn');
+                    sendToApp("DATA:" + rawData);
+                }
+                else {
+                    // Pesan lain - forward ke App tanpa perubahan
+                    printLog("JSON: " + rawData.substring(0, 50), 'info');
+                    sendToApp("JSON:" + rawData);
+                }
+                
+            } catch (parseError) {
+                // Jika bukan JSON, kirim raw data
+                printLog("RAW: " + event.data.substring(0, 100), 'warn');
+                sendToApp("RAW:" + event.data);
+            }
+        }
+
+        // Main loop - handle command dari App Inventor setiap 100ms
+        setInterval(function() {
+            try {
+                var perintah = window.AppInventor.getWebViewString();
+                
+                if (perintah !== "" && perintah !== null) {
+                    printLog("--> TX CMD: " + perintah.substring(0, 50), 'warn');
+                    
+                    // [1] CONNECT COMMAND
+                    if (perintah.startsWith("CONNECT:")) {
+                        printLog("CMD: CONNECTING...", 'warn');
+                        var url = perintah.substring(8);
+                        
+                        // Close existing connection
+                        if(ws && ws.readyState !== WebSocket.CLOSED) {
+                            ws.close();
+                        }
+                        
+                        printLog("Connecting to: " + url, 'info');
+                        ws = new WebSocket(url);
+                        connectionStatus = "CONNECTING";
+                        
+                        ws.onopen = function() { 
+                            connectionStatus = "CONNECTED";
+                            printLog("[OK] WS TERHUBUNG!", 'success'); 
+                            sendToApp("STATUS:CONNECTED");
+                        };
+                        
+                        ws.onclose = function() { 
+                            connectionStatus = "DISCONNECTED";
+                            printLog("[!] WS TERPUTUS", 'error'); 
+                            sendToApp("STATUS:DISCONNECTED");
+                        };
+                        
+                        ws.onerror = function(error) {
+                            printLog("[ERROR] WS Error: " + error.message, 'error');
+                            sendToApp("ERROR:CONNECTION_FAILED");
+                        };
+                        
+                        // HANDLER PALING PENTING - terima pesan dari server
+                        ws.onmessage = handleServerMessage;
+                        
+                        window.AppInventor.setWebViewString("");
+                    } 
+                    
+                    // [2] SEND COMMAND
+                    else if (perintah.startsWith("SEND:")) {
+                        printLog("CMD: SENDING...", 'warn');
+                        var pesan = perintah.substring(5);
+                        
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            printLog("Sending: " + pesan.substring(0, 50), 'info');
+                            ws.send(pesan);
+                            sendToApp("SENT:OK");
+                        } else {
+                            printLog("WS not connected!", 'error');
+                            sendToApp("SENT:FAILED");
+                        }
+                        
+                        window.AppInventor.setWebViewString("");
+                    }
+                    
+                    // [3] STATUS COMMAND
+                    else if (perintah.startsWith("STATUS:")) {
+                        var status = "STATUS:" + (ws ? "WS_READY:" + ws.readyState + "|" + connectionStatus : "NO_WS");
+                        sendToApp(status);
+                        window.AppInventor.setWebViewString("");
+                    }
+                    
+                    // [4] CLEAR LOG
+                    else if (perintah === "CLEAR") {
+                        logDiv.innerHTML = "";
+                        window.AppInventor.setWebViewString("");
+                    }
+                }
+            } catch (e) {
+                printLog("ERROR in main loop: " + e.message, 'error');
+            }
+        }, 100);
+
+        // Initial log
+        printLog("WebSocket Client Ready!", 'success');
+        printLog("Commands: CONNECT:<url>, SEND:<json>, STATUS:, CLEAR", 'info');
+    </script>
+</body>
+</html>

@@ -595,6 +595,16 @@ wss.on('connection', (ws, req) => {
                 
                 console.log(`[Device "${deviceName}"] 📤 Data: ${sensor_type} = ${value}`);
                 
+                // Kirim ACK kembali ke device bahwa data diterima
+                ws.send(JSON.stringify({
+                    status: 'ack',
+                    type: 'dataReceived',
+                    sensor_type: sensor_type,
+                    value: value,
+                    timestamp: new Date().toISOString(),
+                    message: 'Data berhasil diterima'
+                }));
+                
                 // Simpan di database
                 db.run(
                     'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
@@ -618,7 +628,7 @@ wss.on('connection', (ws, req) => {
                         } else {
                             console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
                             
-                            // Broadcast ke public view jika device ini memiliki public slug
+                            // Broadcast ke PUBLIC VIEW
                             db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
                                 if (!err && deviceRow && deviceRow.public_slug) {
                                     broadcastToPublicView(deviceRow.public_slug, {
@@ -629,18 +639,28 @@ wss.on('connection', (ws, req) => {
                                     });
                                 }
                             });
+                            
+                            // Broadcast ke DASHBOARD (user yang punya device ini)
+                            broadcastToUserDashboards(userId, {
+                                device: deviceName,
+                                device_id: deviceId,
+                                var: sensor_type,
+                                val: value,
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            // Broadcast ke semua DEVICES lain yang terhubung (untuk sync)
+                            broadcastToAllDevices({
+                                type: 'dataUpdate',
+                                device_id: deviceId,
+                                device_name: deviceName,
+                                var: sensor_type,
+                                val: value,
+                                timestamp: new Date().toISOString()
+                            }, connClientKey); // Exclude hanya sender connection (by unique key)
                         }
                     }
                 );
-                
-                // Broadcast ke dashboard pengguna
-                broadcastToUserDashboards(userId, {
-                    device: deviceName,
-                    device_id: deviceId,
-                    var: sensor_type,
-                    val: value,
-                    timestamp: new Date().toISOString()
-                });
             }
             
             // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE ---
@@ -693,15 +713,24 @@ wss.on('connection', (ws, req) => {
                     }
                 );
                 
-                // Cari koneksi device yang terauthentikasi (gunakan == untuk loose equality)
-                const deviceKeyEntry = Array.from(allConnections.entries()).find(
+                // Cari SEMUA koneksi device dengan device_id yang sama (untuk multiple instances)
+                const deviceConnections = Array.from(allConnections.entries()).filter(
                     ([key, connectionData]) => connectionData.type === 'device' && connectionData.deviceId == device_id && connectionData.authStatus === 'authenticated'
                 );
                 
-                if (deviceKeyEntry && deviceKeyEntry[1].ws.readyState === WebSocket.OPEN) {
+                if (deviceConnections.length > 0) {
                     const command = { var: sensor_type, val: value };
-                    deviceKeyEntry[1].ws.send(JSON.stringify(command));
-                    console.log(`[✓ Perintah] Dikirim ke device ${device_id}: ${sensor_type} = ${value}`);
+                    let sentCount = 0;
+                    
+                    // Kirim ke SEMUA instance device dengan ID ini
+                    deviceConnections.forEach(([key, deviceConn]) => {
+                        if (deviceConn.ws.readyState === WebSocket.OPEN) {
+                            deviceConn.ws.send(JSON.stringify(command));
+                            sentCount++;
+                        }
+                    });
+                    
+                    console.log(`[✓ Perintah] Dikirim ke ${sentCount} instance device ${device_id}: ${sensor_type} = ${value}`);
                     
                     // Send ACK ke dashboard
                     ws.send(JSON.stringify({ status: 'ack', device_id, var: sensor_type, val: value }));
@@ -783,18 +812,10 @@ wss.on('connection', (ws, req) => {
         deviceId = deviceInfo.device_id;
         deviceName = deviceInfo.device_name;
         userId = deviceInfo.user_id;
-        connClientKey = `device:${deviceId}`;
+        // Gunakan unique key seperti dashboard, sehingga multiple instances dari device yang sama bisa coexist
+        connClientKey = `device:${deviceId}:${Date.now()}:${Math.random()}`;
         
-        // Cek koneksi sebelumnya dari device yang sama
-        const oldKey = Array.from(allConnections.entries()).find(
-            ([key, val]) => val.type === 'device' && val.deviceId === deviceId && val.authStatus === 'authenticated'
-        );
-        if (oldKey) {
-            console.log(`[Device] Menutup koneksi sebelumnya dari "${deviceName}"`);
-            allConnections.get(oldKey[0]).ws.close(1000, 'Koneksi baru dari device yang sama');
-            allConnections.delete(oldKey[0]);
-        }
-        
+        // TIDAK menutup koneksi sebelumnya - biarkan multiple instances coexist
         allConnections.set(connClientKey, { 
             type: 'device', 
             ws, 
@@ -866,6 +887,42 @@ function broadcastToUserDashboards(userId, data) {
         console.log(`[Broadcast] ⚠️ Tidak ada dashboard aktif untuk user ID ${userId}`);
     } else {
         console.log(`[Broadcast] ✓ Data dikirim ke ${broadcastCount} dashboard`);
+    }
+}
+
+// --- BROADCAST KE SEMUA DEVICES (untuk sinkronisasi data antar device) ---
+function broadcastToAllDevices(data, excludeConnKey = null) {
+    const payload = JSON.stringify(data);
+    let broadcastCount = 0;
+    
+    console.log(`[Device Broadcast] Mengirim ke semua device...`);
+    
+    // DEBUG: Tampilkan semua koneksi yang ada
+    console.log(`[Device Broadcast DEBUG] Total koneksi: ${allConnections.size}`);
+    allConnections.forEach((conn, key) => {
+        console.log(`  - Key: ${key}, Type: ${conn.type}, AuthStatus: ${conn.authStatus}, DeviceId: ${conn.deviceId}, Ready: ${conn.ws?.readyState === WebSocket.OPEN}`);
+    });
+    
+    allConnections.forEach((conn, key) => {
+        if (conn.type === 'device' && conn.authStatus === 'authenticated') {
+            // Exclude hanya sender connection (by unique key), bukan semua instance dari device yang sama
+            if (excludeConnKey && key === excludeConnKey) {
+                console.log(`[Device Broadcast] Skip sender: ${key}`);
+                return;
+            }
+            
+            if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
+                conn.ws.send(payload);
+                broadcastCount++;
+                console.log(`[Device Broadcast] Data dikirim ke device ${conn.deviceId} (${conn.deviceName})`);
+            }
+        }
+    });
+    
+    if (broadcastCount === 0) {
+        console.log(`[Device Broadcast] ⚠️ Tidak ada device aktif untuk broadcast`);
+    } else {
+        console.log(`[Device Broadcast] ✓ Data dikirim ke ${broadcastCount} device`);
     }
 }
 
