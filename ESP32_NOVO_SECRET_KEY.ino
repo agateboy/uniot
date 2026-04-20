@@ -4,7 +4,7 @@
 #include "DHT.h"
 
 // ==========================================
-// ⚙️  KONFIGURASI HARDWARE
+// ⚙️ KONFIGURASI HARDWARE
 // ==========================================
 #define DHTPIN 5
 #define DHTTYPE DHT22
@@ -13,100 +13,127 @@
 #define LED_PIN_PWM 7      // Pin Aktuator: LED PWM (Brightness)
 
 // ==========================================
-// 📡 KONFIGURASI WiFi
+// KONFIGURASI WiFi
 // ==========================================
-const char* ssid = "iPhone";
-const char* password = "12345678";
+const char* ssid = "Nuju Coffee 2";
+const char* password = "seturanyogyakarta";
 
 // ==========================================
-// 🔑 KONFIGURASI UNIOT SERVER (Secret Key)
+// KONFIGURASI UNIOT SERVER (Secret Key)
 // ==========================================
-const char* ws_host = "172.20.10.2";  // IP Server UNIOT
+const char* ws_host = "192.168.110.152";  // IP Server UNIOT
 const int ws_port = 3001;               // Port Server
-const char* secret_key = "Wnx3UH";      // ⚠️  GANTI dengan secret key dari dashboard (6 karakter)
+const char* secret_key = "Wnx3UH";      // ⚠️ GANTI dengan secret key dari dashboard (6 karakter)
 
 // ==========================================
-// 🔧 INISIALISASI GLOBAL
+// INISIALISASI GLOBAL
 // ==========================================
 WebSocketsClient webSocket;
 DHT dht(DHTPIN, DHTTYPE);
 
 unsigned long lastPotRead = 0;
 unsigned long lastDHTRead = 0;
-
 bool isConnected = false;
-bool isAuthenticated = false;  // Rastrear status de autenticação
+
+// ⭐ CHANGE DETECTION: Simpan nilai terakhir untuk deteksi perubahan
+float lastPotValue = -1;
+float lastTempValue = -1;
+float lastHumidityValue = -1;
+
+// ⭐ THRESHOLD: Kirim hanya jika perubahan signifikan
+const float POT_THRESHOLD = 5.0;        // Kirim jika berubah 5% atau lebih
+const float TEMP_THRESHOLD = 0.5;       // Kirim jika berubah 0.5°C atau lebih
+const float HUMIDITY_THRESHOLD = 3.0;   // Kirim jika berubah 3% atau lebih
+
+// ⭐ INTERVAL: Naikkan interval agar tidak terlalu sering
+const unsigned long POT_INTERVAL = 1000;    // Ubah dari 500ms → 1000ms
+const unsigned long DHT_INTERVAL = 5000;    // Ubah dari 2000ms → 5000ms
 
 // ==========================================
-// 📨 CALLBACK: WebSocket Events Handler
+// FUNGSI SUBSCRIBER: Eksekusi Perintah Aktuator
+// ==========================================
+void eksekusiAktuator(const char* sensorType, const char* value) {
+  
+  // Kontrol LED on/off (Pin 6)
+  if (strcmp(sensorType, "kondisi-led") == 0) {
+    bool state = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+    digitalWrite(LED_PIN_ONOFF, state ? HIGH : LOW);
+    Serial.printf("✓ EKSEKUSI: LED (Pin 6) diubah menjadi %s\n", state ? "ON" : "OFF");
+  }
+  
+  // Kontrol LED PWM / Brightness (Pin 7)
+  else if (strcmp(sensorType, "pwm-led") == 0) {
+    int pwmValue = constrain(atoi(value), 0, 255);
+    analogWrite(LED_PIN_PWM, pwmValue);
+    Serial.printf("✓ EKSEKUSI: PWM (Pin 7) diubah menjadi %d/255\n", pwmValue);
+  }
+  
+  else {
+    Serial.printf("Aktuator tidak dikenali: %s\n", sensorType);
+  }
+}
+
+// ==========================================
+// CALLBACK: WebSocket Events Handler
 // ==========================================
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     
     case WStype_DISCONNECTED: {
       isConnected = false;
-      isAuthenticated = false;
-      Serial.println("[WS] ❌ Disconnected dari server");
-      Serial.println("[WS] Tentando reconectar em 5 segundos...");
+      Serial.println("[WS] Terputus dari server UNIOT");
+      Serial.println("[WS] Mencoba menyambung kembali...");
       break;
     }
 
     case WStype_CONNECTED: {
       isConnected = true;
-      isAuthenticated = false;  // Reset auth status pada reconexão
-      Serial.println("[WS] ✅ TERHUBUNG ke UNIOT Server (pendente autenticação)");
-      Serial.println("[WS] Enviando handshake de autenticação...");
-      
-      // === ENVIAR HANDSHAKE AUTH ===
-      StaticJsonDocument<128> authDoc;
-      authDoc["action"] = "auth";
-      authDoc["key"] = secret_key;
-      String authJson;
-      serializeJson(authDoc, authJson);
-      webSocket.sendTXT(authJson);
-      Serial.printf("[WS] 📤 Auth enviada: %s\n", authJson.c_str());
-      Serial.println("");
+      Serial.println("[WS] TERHUBUNG ke Websocket UNIOT Server!");
+      Serial.println("[WS] Siap mengirim (Publish) dan menerima (Subscribe) data.\n");
       break;
     }
 
     case WStype_TEXT: {
       // Parse JSON perintah dari dashboard
-      // Format utama: {"var": "kondisi-led", "val": "true"}
-      // Kompatibilitas: {"sensor_type": "kondisi-led", "value": "true"}
-      
-      DynamicJsonDocument doc(256);
+      StaticJsonDocument<256> doc;
       DeserializationError error = deserializeJson(doc, payload, length);
 
       if (error) {
-        Serial.printf("[JSON] ❌ Parse error: %s\n", error.c_str());
+        Serial.printf("[JSON] Parse error: %s\n", error.c_str());
         break;
       }
 
-      const char* sensorType = doc["var"] | doc["sensor_type"];
-      const char* value = doc["val"] | doc["value"];
+      const char* sensorType = doc["var"];
+      
+      const char* value = doc["current_value"]; 
+
+      // Fallback cadangan jika format menggunakan "val"
+      if (!value) {
+        value = doc["val"];
+      }
 
       if (!sensorType || !value) {
-        Serial.println("[WS] ⚠️  Payload não completo (precisa var/val)");
+        // Serial.println("[WS] Payload tidak lengkap (kehilangan sensor_type atau value)");
         break;
       }
 
-      Serial.printf("[WS] 📥 Comando recebido: %s = %s\n", sensorType, value);
+      Serial.printf("[WS] Perintah Diterima dari Dashboard: %s = %s\n", sensorType, value);
       eksekusiAktuator(sensorType, value);
       break;
     }
 
     case WStype_PING: {
-      Serial.println("[WS] 🔔 PING recebido do server");
+      Serial.println("[WS] PING diterima dari server");
       break;
     }
 
     case WStype_PONG: {
-      Serial.println("[WS] 🔔 PONG do server");
+      Serial.println("[WS] PONG dibalas oleh server");
       break;
     }
 
     case WStype_ERROR: {
-      Serial.printf("[WS] ❌ Error: %s\n", payload);
+      Serial.printf("[WS] Error: %s\n", payload);
       break;
     }
 
@@ -116,41 +143,10 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 // ==========================================
-// 🎮 FUNGSI: Eksekusi Perintah Aktuator
-// Menerima perintah dari dashboard dan execute
-// ==========================================
-void eksekusiAktuator(const char* sensorType, const char* value) {
-  
-  // Kontrol LED on/off (Pin 6)
-  if (strcmp(sensorType, "kondisi-led") == 0) {
-    bool state = strcmp(value, "true") == 0 || strcmp(value, "1") == 0;
-    digitalWrite(LED_PIN_ONOFF, state ? HIGH : LOW);
-    Serial.printf("✓ LED (Pin 6): %s\n", state ? "ON" : "OFF");
-  }
-  
-  // Kontrol LED PWM / Brightness (Pin 7)
-  else if (strcmp(sensorType, "pwm-led") == 0) {
-    int pwmValue = constrain(atoi(value), 0, 255);
-    analogWrite(LED_PIN_PWM, pwmValue);
-    Serial.printf("✓ PWM (Pin 7): %d/255\n", pwmValue);
-  }
-  
-  // Tambahkan aktuator lainnya sesuai kebutuhan
-  else {
-    Serial.printf("⚠️  Aktuator tidak dikenali: %s\n", sensorType);
-  }
-}
-
-// ==========================================
-// 📤 FUNGSI: Kirim Data Sensor ke Server
-// Format JSON: {"var": "suhu", "val": 28.5}
+// 📤 FUNGSI PUBLISHER: Kirim Data Sensor
 // ==========================================
 void kirimDataWebSocket(const char* sensor_type, float value) {
-  
-  // Verifica se está conectado E autenticado
-  if (!isConnected || !isAuthenticated) {
-    return;  // Silencioso se não está conectado/autenticado
-  }
+  if (!isConnected) return; // Jangan buang memori jika belum konek
 
   StaticJsonDocument<128> doc;
   doc["var"] = sensor_type;
@@ -159,8 +155,8 @@ void kirimDataWebSocket(const char* sensor_type, float value) {
   String jsonString;
   serializeJson(doc, jsonString);
 
-  webSocket.sendTXT(jsonString);
-  Serial.printf("📤 [%s]: %.2f\n", sensor_type, value);
+  webSocket.sendTXT(jsonString); // Kirim instan tanpa HTTP POST
+  Serial.printf("Data Terkirim [%s]: %.2f\n", sensor_type, value);
 }
 
 // ==========================================
@@ -177,14 +173,14 @@ void setup() {
 
   // Inisialisasi sensor DHT22
   dht.begin();
-  Serial.println("[SENSOR] ✓ DHT22 initialized");
+  Serial.println("[SENSOR] DHT22 Siap");
 
   // Inisialisasi pin aktuator
   pinMode(LED_PIN_ONOFF, OUTPUT);
   digitalWrite(LED_PIN_ONOFF, LOW);
   pinMode(LED_PIN_PWM, OUTPUT);
   analogWrite(LED_PIN_PWM, 0);
-  Serial.println("[AKTUATOR] ✓ LED pins initialized");
+  Serial.println("[AKTUATOR] LED Siap");
 
   // === Koneksi WiFi ===
   Serial.printf("[WiFi] Menghubungkan ke: %s...\n", ssid);
@@ -199,96 +195,71 @@ void setup() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("\n[WiFi] ✅ Terhubung! IP: %s\n\n", WiFi.localIP().toString().c_str());
+    Serial.printf("\n[WiFi] Terhubung! IP Address: %s\n\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("\n[WiFi] ❌ Gagal terhubung. Periksa SSID & Password!");
+    Serial.println("\n[WiFi] Gagal terhubung. Periksa SSID & Password!");
     return;
   }
 
-  // === Koneksi WebSocket ao UNIOT Server ===
-  Serial.printf("[WS] Conectando ao: ws://%s:%d\n", ws_host, ws_port);
-  Serial.printf("[WS] Secret key (para handshake): %s\n", secret_key);
+  // === Koneksi WebSocket ke UNIOT Server ===
+  Serial.printf("[WS] Membuka terowongan ke: ws://%s:%d\n", ws_host, ws_port);
   
-  // Conectar sem parâmetros na URL (autenticação via handshake)
-  webSocket.begin(ws_host, ws_port, "/");
+  // Format URL: /?key=0Ly6kU
+  String ws_path = String("/") + "?key=" + String(secret_key);
+  
+  webSocket.begin(ws_host, ws_port, ws_path.c_str());
   webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);  // Tentar reconectar a cada 5 segundos
+  webSocket.setReconnectInterval(5000);  // Reconnect otomatis jika putus
   
-  Serial.println("[WS] 🔗 Conexão iniciada...");
-
-  Serial.println("\n[SETUP] ✅ Initialization complete!\n");
-  Serial.println("Waiting for WebSocket connection...\n");
+  Serial.println("[SETUP] Inisialisasi selesai. Menunggu koneksi...\n");
 }
 
 // ==========================================
-// 🔄 LOOP: Pembacaan Sensor & Control
+// LOOP: Pembacaan Sensor (Publisher)
 // ==========================================
 void loop() {
-  // WAJIB: Maintain WebSocket connection (chamada frequente)
+  // WAJIB: Menjaga terowongan WebSocket tetap hidup
   webSocket.loop();
   
-  // Pequeno delay para evitar WDT reset
-  delay(10);
-
   unsigned long now = millis();
 
-  // ===== PEMBACAAN POTENSIOMETER (500ms) =====
-  // Interval lebih singkat karena pembacaan analog cepat & stable
-  if (now - lastPotRead > 500) {
+  // ===== PUBLISH POTENSIOMETER (Interval 1000ms + Change Detection) =====
+  if (now - lastPotRead > POT_INTERVAL) {
     lastPotRead = now;
     int rawVal = analogRead(POT_PIN);
     float potVal = map(rawVal, 0, 4095, 0, 100);
-    kirimDataWebSocket("potensiometer", potVal);
+    
+    // ⭐ Kirim hanya jika perubahan >= threshold
+    float potDiff = abs(potVal - lastPotValue);
+    if (lastPotValue < 0 || potDiff >= POT_THRESHOLD) {
+      lastPotValue = potVal;
+      kirimDataWebSocket("potensiometer", potVal);
+    }
   }
 
-  // ===== PEMBACAAN DHT22 (2000ms) =====
-  // Jeda PENTING untuk menjaga stabilitas sensor fisik
-  if (now - lastDHTRead > 2000) {
+  // ===== PUBLISH DHT22 (Interval 5000ms + Change Detection) =====
+  if (now - lastDHTRead > DHT_INTERVAL) {
     lastDHTRead = now;
     
     float humidity = dht.readHumidity();
     float temperature = dht.readTemperature();
 
-    // Validasi pembacaan (DHT22 bisa return NaN jika error)
     if (!isnan(temperature)) {
-      kirimDataWebSocket("suhu", temperature);
-    } else {
-      Serial.println("⚠️  DHT22: gagal baca temperature");
+      // ⭐ Kirim suhu hanya jika perubahan >= threshold
+      if (lastTempValue < -100 || abs(temperature - lastTempValue) >= TEMP_THRESHOLD) {
+        lastTempValue = temperature;
+        kirimDataWebSocket("suhu", temperature);
+      }
     }
+    else Serial.println("⚠ DHT22: Gagal membaca suhu");
 
     if (!isnan(humidity)) {
-      kirimDataWebSocket("kelembapan", humidity);
-    } else {
-      Serial.println("⚠️  DHT22: gagal baca humidity");
+      // ⭐ Kirim kelembapan hanya jika perubahan >= threshold
+      if (lastHumidityValue < 0 || abs(humidity - lastHumidityValue) >= HUMIDITY_THRESHOLD) {
+        lastHumidityValue = humidity;
+        kirimDataWebSocket("kelembapan", humidity);
+      }
     }
+    else Serial.println("⚠ DHT22: Gagal membaca kelembapan");
   }
 }
-
-// ==========================================
-// 📋 INFORMAÇÃO DE CONEXÃO
-// ==========================================
-/*
-  CONNECTION FLOW:
-  1. Conecta ao: ws://172.20.10.2:3001/
-  2. Server aceita conexão (status: pending)
-  3. Device envia: {"action":"auth","key":"0Ly6kU"}
-  4. Server valida e responde: {"status":"success","message":"...","device_id":1}
-  5. Device pode agora enviar dados
-  
-  SENSOR DATA FORMAT (Device → Server):
-  {"var": "suhu", "val": 28.5}
-  {"var": "kelembapan", "val": 65.2}
-  {"var": "potensiometer", "val": 45.3}
-  
-  COMMAND FORMAT (Server → Device):
-  {"var": "kondisi-led", "val": "true"}
-  {"var": "pwm-led", "val": "128"}
-  
-  FEATURES:
-  ✓ Manual Handshake Authentication (sem URL parameters)
-  ✓ 3-segundo timeout para autenticação
-  ✓ Auto-reconnect a cada 5 segundos
-  ✓ Comunicação bidirecional em tempo real
-  ✓ Dashboard pode enviar comandos para device
-  ✓ Compatible com Android WebSocket Tester app
-*/

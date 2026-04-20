@@ -37,6 +37,42 @@ const wss = new WebSocket.Server({ server });
 const port = Number(process.env.PORT) || 3001;
 const localIp = process.env.LOCAL_IP || '127.0.0.1';
 
+// ⭐ MESSAGE QUEUE SYSTEM: Async processing untuk mencegah message bottleneck
+class MessageQueue {
+    constructor(maxConcurrent = 10) {
+        this.queue = [];
+        this.processing = 0;
+        this.maxConcurrent = maxConcurrent;
+    }
+
+    // Tambah message ke queue dengan priority (command = priority 1, data = priority 0)
+    enqueue(message, priority = 0) {
+        this.queue.push({ message, priority });
+        // Sort by priority (higher priority first)
+        this.queue.sort((a, b) => b.priority - a.priority);
+        this.process();
+    }
+
+    async process() {
+        if (this.processing >= this.maxConcurrent) return;
+        if (this.queue.length === 0) return;
+
+        this.processing++;
+        const item = this.queue.shift();
+
+        try {
+            await item.message();
+        } catch (error) {
+            console.error('[Queue] Error processing message:', error);
+        }
+
+        this.processing--;
+        this.process(); // Process next message
+    }
+}
+
+const messageQueue = new MessageQueue(15); // Max 15 concurrent message processing
+
 // Storage untuk tracking connected clients
 const allConnections = new Map(); // Map<connClientKey, { type: 'device'|'dashboard', ws, deviceName?, userId? }>
 const secretKeyRegistry = new Map(); // Map<secretKey, { device_id, device_name, user_id }>
@@ -603,200 +639,221 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (rawMessage) => {
         try {
             const messageText = rawMessage.toString();
-            console.log(`[WebSocket Message] Dari ${clientType || 'unknown'}: ${messageText.substring(0, 100)}`);
-            
             const data = JSON.parse(messageText);
-            
-            // === HANDSHAKE AUTH UNTUK DEVICES YANG MENUNGGU ===
-            if (clientType === 'device' && authStatus === 'pending') {
-                if (data.action === 'auth' && data.key) {
-                    const secretKey = data.key;
-                    const deviceInfo = secretKeyRegistry.get(secretKey);
-                    
-                    if (!deviceInfo) {
-                        console.log(`[✗ Device] Secret key tidak valid: ${secretKey}`);
-                        ws.send(JSON.stringify({ 
-                            status: 'error', 
-                            message: 'Secret key tidak valid' 
-                        }));
-                        ws.close(1008, 'Secret key tidak valid');
+
+            // Tentukan priority: Command (dari dashboard atau device) = priority 1, Data sensor = priority 0
+            let messagePriority = 0;
+            let messageType = 'unknown';
+
+            // Deteksi tipe message
+            if (clientType === 'dashboard') {
+                messagePriority = 1; // Dashboard command: PRIORITAS TINGGI
+                messageType = 'dashboard-command';
+            } else if (clientType === 'device') {
+                const hasTargetDevice = data.device_id !== undefined && data.device_id !== null && data.device_id !== '';
+                const isCommandMessage = data.type === 'command' || hasTargetDevice;
+                messagePriority = isCommandMessage ? 1 : 0; // Command > Data sensor
+                messageType = isCommandMessage ? 'device-command' : 'device-data';
+            } else if (clientType === 'pending') {
+                messagePriority = 1; // Auth message: PRIORITAS TINGGI
+                messageType = 'auth';
+            }
+
+            console.log(`[WebSocket Message] Dari ${clientType || 'unknown'} (Type: ${messageType}, Priority: ${messagePriority})`);
+
+            // ⭐ ENQUEUE ke message queue untuk async processing
+            messageQueue.enqueue(async () => {
+                // === HANDSHAKE AUTH UNTUK DEVICES YANG MENUNGGU ===
+                if (clientType === 'device' && authStatus === 'pending') {
+                    if (data.action === 'auth' && data.key) {
+                        const secretKey = data.key;
+                        const deviceInfo = secretKeyRegistry.get(secretKey);
+                        
+                        if (!deviceInfo) {
+                            console.log(`[✗ Device] Secret key tidak valid: ${secretKey}`);
+                            ws.send(JSON.stringify({ 
+                                status: 'error', 
+                                message: 'Secret key tidak valid' 
+                            }));
+                            ws.close(1008, 'Secret key tidak valid');
+                            allConnections.delete(connClientKey);
+                            clearTimeout(authTimeout);
+                            return;
+                        }
+                        
+                        // Autentikasi berhasil
+                        authStatus = 'authenticated';
+                        deviceId = deviceInfo.device_id;
+                        deviceName = deviceInfo.device_name;
+                        userId = deviceInfo.user_id;
+                        
+                        // Tukar kunci di peta koneksi (dari menunggu ke terauthentikasi)
                         allConnections.delete(connClientKey);
+                        connClientKey = `device:${deviceId}`;
+                        
+                        // Verifikasi koneksi sebelumnya dari device yang sama
+                        const oldKey = Array.from(allConnections.entries()).find(
+                            ([key, val]) => val.type === 'device' && val.deviceId === deviceId && val.authStatus === 'authenticated'
+                        );
+                        if (oldKey) {
+                            console.log(`[Device] Menutup koneksi sebelumnya dari "${deviceName}"`);
+                            allConnections.get(oldKey[0]).ws.close(1000, 'Koneksi baru dari device yang sama');
+                            allConnections.delete(oldKey[0]);
+                        }
+                        
+                        // Simpan klien yang terauthentikasi
+                        allConnections.set(connClientKey, { 
+                            type: 'device', 
+                            ws, 
+                            deviceId, 
+                            deviceName, 
+                            userId,
+                            authStatus: 'authenticated'
+                        });
+                        
+                        // Kirim konfirmasi
+                        ws.send(JSON.stringify({ 
+                            status: 'success', 
+                            message: `Terauthentikasi sebagai "${deviceName}"`,
+                            device_id: deviceId
+                        }));
+                        
+                        console.log(`[✓ Device] Terauthentikasi - "${deviceName}" (ID: ${deviceId})`);
                         clearTimeout(authTimeout);
                         return;
                     }
-                    
-                    // Autentikasi berhasil
-                    authStatus = 'authenticated';
-                    deviceId = deviceInfo.device_id;
-                    deviceName = deviceInfo.device_name;
-                    userId = deviceInfo.user_id;
-                    
-                    // Tukar kunci di peta koneksi (dari menunggu ke terauthentikasi)
-                    allConnections.delete(connClientKey);
-                    connClientKey = `device:${deviceId}`;
-                    
-                    // Verifikasi koneksi sebelumnya dari device yang sama
-                    const oldKey = Array.from(allConnections.entries()).find(
-                        ([key, val]) => val.type === 'device' && val.deviceId === deviceId && val.authStatus === 'authenticated'
-                    );
-                    if (oldKey) {
-                        console.log(`[Device] Menutup koneksi sebelumnya dari "${deviceName}"`);
-                        allConnections.get(oldKey[0]).ws.close(1000, 'Koneksi baru dari device yang sama');
-                        allConnections.delete(oldKey[0]);
+                    else {
+                        // Pesan tidak valid saat menunggu
+                        console.log(`[⚠️  Device] Pesan tidak valid saat handshake`);
+                        ws.send(JSON.stringify({ 
+                            status: 'error', 
+                            message: 'Kirim {"action":"auth","key":"..."} untuk authenticating' 
+                        }));
+                        return;
                     }
-                    
-                    // Simpan klien yang terauthentikasi
-                    allConnections.set(connClientKey, { 
-                        type: 'device', 
-                        ws, 
-                        deviceId, 
-                        deviceName, 
-                        userId,
-                        authStatus: 'authenticated'
-                    });
-                    
-                    // Kirim konfirmasi
-                    ws.send(JSON.stringify({ 
-                        status: 'success', 
-                        message: `Terauthentikasi sebagai "${deviceName}"`,
-                        device_id: deviceId
-                    }));
-                    
-                    console.log(`[✓ Device] Terauthentikasi - "${deviceName}" (ID: ${deviceId})`);
-                    clearTimeout(authTimeout);
+                }
+                
+                // === HANYA KLIEN YANG TERAUTHENTIKASI YANG DAPAT MENGIRIM DATA ===
+                if (authStatus !== 'authenticated') {
+                    console.log(`[✗] Klien yang tidak terauthentikasi mencoba mengirim data`);
                     return;
                 }
-                else {
-                    // Pesan tidak valid saat menunggu
-                    console.log(`[⚠️  Device] Pesan tidak valid saat handshake`);
-                    ws.send(JSON.stringify({ 
-                        status: 'error', 
-                        message: 'Kirim {"action":"auth","key":"..."} untuk authenticating' 
-                    }));
-                    return;
-                }
-            }
-            
-            // === HANYA KLIEN YANG TERAUTHENTIKASI YANG DAPAT MENGIRIM DATA ===
-            if (authStatus !== 'authenticated') {
-                console.log(`[✗] Klien yang tidak terauthentikasi mencoba mengirim data`);
-                return;
-            }
-            
-            // --- DEVICE MENGIRIM DATA SENSOR ---
-            if (clientType === 'device') {
-                const { sensor_type, value } = normalizeSensorPayload(data);
-                if (!sensor_type || value === undefined) {
-                    console.error('[Device] Pesan tidak valid - butuh var/val atau sensor_type/value');
-                    return;
-                }
-
-                // Dukungan mode controller dari MIT App:
-                // jika payload mengandung device_id / type=command, perlakukan sebagai command.
-                const hasTargetDevice = data.device_id !== undefined && data.device_id !== null && data.device_id !== '';
-                const targetDeviceId = hasTargetDevice ? data.device_id : deviceId;
-                const isCommandMessage = data.type === 'command' || hasTargetDevice;
-
-                if (isCommandMessage) {
-                    // Koneksi device hanya boleh mengontrol device miliknya sendiri (sesuai secret key).
-                    if (String(targetDeviceId) !== String(deviceId)) {
-                        console.warn(`[✗ Device] Menolak command lintas device. device auth=${deviceId}, target=${targetDeviceId}`);
-                        ws.send(JSON.stringify({ status: 'error', message: 'Tidak diizinkan mengontrol device lain' }));
+                
+                // --- DEVICE MENGIRIM DATA SENSOR ---
+                if (clientType === 'device') {
+                    const { sensor_type, value } = normalizeSensorPayload(data);
+                    if (!sensor_type || value === undefined) {
+                        console.error('[Device] Pesan tidak valid - butuh var/val atau sensor_type/value');
                         return;
                     }
 
-                    console.log(`[Device/Controller ${deviceName}] 🎮 Perintah lokal: ${sensor_type} = ${value}`);
-                    persistControlState(targetDeviceId, sensor_type, value);
-                    routeCommandToDeviceInstances('device-controller', targetDeviceId, sensor_type, value, ws, connClientKey);
-                    return;
-                }
-                
-                console.log(`[Device "${deviceName}"] 📤 Data: ${sensor_type} = ${value}`);
-                
-                // Kirim ACK kembali ke device bahwa data diterima
-                ws.send(JSON.stringify({
-                    status: 'ack',
-                    type: 'dataReceived',
-                    sensor_type: sensor_type,
-                    value: value,
-                    timestamp: new Date().toISOString(),
-                    message: 'Data berhasil diterima'
-                }));
-                
-                // Simpan di database
-                db.run(
-                    'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
-                    [deviceId, sensor_type, value],
-                    (err) => {
-                        if (err) {
-                            console.error('Kesalahan saat menyimpan sensor data:', err);
-                        } else {
-                            console.log(`[✓ Database] Sensor data tersimpan: device ${deviceId}, ${sensor_type} = ${value}`);
-                        }
-                    }
-                );
-                
-                // Update widget current_value di database (jika widget ada)
-                db.run(
-                    'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
-                    [value, deviceId, sensor_type],
-                    (err) => {
-                        if (err) {
-                            console.error('Error updating widget current_value:', err);
-                        } else {
-                            console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
-                            
-                            // Broadcast ke PUBLIC VIEW
-                            db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
-                                if (!err && deviceRow && deviceRow.public_slug) {
-                                    broadcastToPublicView(deviceRow.public_slug, {
-                                        type: 'dataUpdate',
-                                        sensor_type: sensor_type,
-                                        current_value: value,
-                                        timestamp: new Date().toISOString()
-                                    });
-                                }
-                            });
-                            
-                            // Broadcast ke DASHBOARD (user yang punya device ini)
-                            broadcastToUserDashboards(userId, {
-                                device: deviceName,
-                                device_id: deviceId,
-                                var: sensor_type,
-                                val: value,
-                                timestamp: new Date().toISOString()
-                            });
-                            
-                            // Broadcast ke semua DEVICES lain yang terhubung (untuk sync)
-                            broadcastToAllDevices({
-                                type: 'dataUpdate',
-                                device_id: deviceId,
-                                device_name: deviceName,
-                                var: sensor_type,
-                                val: value,
-                                timestamp: new Date().toISOString()
-                            }, connClientKey); // Exclude hanya sender connection (by unique key)
-                        }
-                    }
-                );
-            }
-            
-            // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE ---
-            else if (clientType === 'dashboard') {
-                const device_id = data.device_id;
-                const { sensor_type, value } = normalizeSensorPayload(data);
-                if (!device_id || !sensor_type || value === undefined) {
-                    console.error('[Dashboard] Pesan tidak valid - butuh device_id + var/val atau sensor_type/value');
-                    ws.send(JSON.stringify({ status: 'error', message: 'Format pesan tidak valid' }));
-                    return;
-                }
-                
-                console.log(`[Dashboard User ${userId}] 📥 Perintah untuk device ${device_id}: ${sensor_type} = ${value}`);
+                    // Dukungan mode controller dari MIT App:
+                    // jika payload mengandung device_id / type=command, perlakukan sebagai command.
+                    const hasTargetDevice = data.device_id !== undefined && data.device_id !== null && data.device_id !== '';
+                    const targetDeviceId = hasTargetDevice ? data.device_id : deviceId;
+                    const isCommandMessage = data.type === 'command' || hasTargetDevice;
 
-                persistControlState(device_id, sensor_type, value);
-                routeCommandToDeviceInstances('dashboard', device_id, sensor_type, value, ws);
-            }
-            
+                    if (isCommandMessage) {
+                        // Koneksi device hanya boleh mengontrol device miliknya sendiri (sesuai secret key).
+                        if (String(targetDeviceId) !== String(deviceId)) {
+                            console.warn(`[✗ Device] Menolak command lintas device. device auth=${deviceId}, target=${targetDeviceId}`);
+                            ws.send(JSON.stringify({ status: 'error', message: 'Tidak diizinkan mengontrol device lain' }));
+                            return;
+                        }
+
+                        console.log(`[Device/Controller ${deviceName}] 🎮 Perintah lokal: ${sensor_type} = ${value}`);
+                        persistControlState(targetDeviceId, sensor_type, value);
+                        routeCommandToDeviceInstances('device-controller', targetDeviceId, sensor_type, value, ws, connClientKey);
+                        return;
+                    }
+                    
+                    console.log(`[Device "${deviceName}"] 📤 Data: ${sensor_type} = ${value}`);
+                    
+                    // Kirim ACK kembali ke device bahwa data diterima
+                    ws.send(JSON.stringify({
+                        status: 'ack',
+                        type: 'dataReceived',
+                        sensor_type: sensor_type,
+                        value: value,
+                        timestamp: new Date().toISOString(),
+                        message: 'Data berhasil diterima'
+                    }));
+                    
+                    // ⭐ ASYNC: Simpan di database (tidak blocking)
+                    db.run(
+                        'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
+                        [deviceId, sensor_type, value],
+                        (err) => {
+                            if (err) {
+                                console.error('Kesalahan saat menyimpan sensor data:', err);
+                            } else {
+                                console.log(`[✓ Database] Sensor data tersimpan: device ${deviceId}, ${sensor_type} = ${value}`);
+                            }
+                        }
+                    );
+                    
+                    // Update widget current_value di database (jika widget ada)
+                    db.run(
+                        'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
+                        [value, deviceId, sensor_type],
+                        (err) => {
+                            if (err) {
+                                console.error('Error updating widget current_value:', err);
+                            } else {
+                                console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
+                                
+                                // Broadcast ke PUBLIC VIEW
+                                db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
+                                    if (!err && deviceRow && deviceRow.public_slug) {
+                                        broadcastToPublicView(deviceRow.public_slug, {
+                                            type: 'dataUpdate',
+                                            sensor_type: sensor_type,
+                                            current_value: value,
+                                            timestamp: new Date().toISOString()
+                                        });
+                                    }
+                                });
+                                
+                                // Broadcast ke DASHBOARD (user yang punya device ini)
+                                broadcastToUserDashboards(userId, {
+                                    device: deviceName,
+                                    device_id: deviceId,
+                                    var: sensor_type,
+                                    val: value,
+                                    timestamp: new Date().toISOString()
+                                });
+                                
+                                // Broadcast ke semua DEVICES lain yang terhubung (untuk sync)
+                                broadcastToAllDevices({
+                                    type: 'dataUpdate',
+                                    device_id: deviceId,
+                                    device_name: deviceName,
+                                    var: sensor_type,
+                                    val: value,
+                                    timestamp: new Date().toISOString()
+                                }, connClientKey); // Exclude hanya sender connection (by unique key)
+                            }
+                        }
+                    );
+                }
+                
+                // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE (PRIORITAS TINGGI) ---
+                else if (clientType === 'dashboard') {
+                    const device_id = data.device_id;
+                    const { sensor_type, value } = normalizeSensorPayload(data);
+                    if (!device_id || !sensor_type || value === undefined) {
+                        console.error('[Dashboard] Pesan tidak valid - butuh device_id + var/val atau sensor_type/value');
+                        ws.send(JSON.stringify({ status: 'error', message: 'Format pesan tidak valid' }));
+                        return;
+                    }
+                    
+                    console.log(`[Dashboard User ${userId}] 📥 Perintah untuk device ${device_id}: ${sensor_type} = ${value}`);
+
+                    persistControlState(device_id, sensor_type, value);
+                    routeCommandToDeviceInstances('dashboard', device_id, sensor_type, value, ws);
+                }
+            }, messagePriority); // ⭐ Dengan priority sesuai tipe message
+
         } catch (parseErr) {
             console.error('[WebSocket] Parse error:', parseErr.message);
         }
