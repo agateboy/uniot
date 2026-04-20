@@ -71,7 +71,8 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 
     case WStype_TEXT: {
       // Parse JSON perintah dari dashboard
-      // Format: {"sensor_type": "kondisi-led", "value": "true"}
+      // Format utama: {"var": "kondisi-led", "val": "true"}
+      // Kompatibilitas: {"sensor_type": "kondisi-led", "value": "true"}
       
       DynamicJsonDocument doc(256);
       DeserializationError error = deserializeJson(doc, payload, length);
@@ -81,11 +82,11 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         break;
       }
 
-      const char* sensorType = doc["sensor_type"];
-      const char* value = doc["value"];
+      const char* sensorType = doc["var"] | doc["sensor_type"];
+      const char* value = doc["val"] | doc["value"];
 
       if (!sensorType || !value) {
-        Serial.println("[WS] ⚠️  Payload não completo (precisa sensor_type & value)");
+        Serial.println("[WS] ⚠️  Payload não completo (precisa var/val)");
         break;
       }
 
@@ -142,7 +143,7 @@ void eksekusiAktuator(const char* sensorType, const char* value) {
 
 // ==========================================
 // 📤 FUNGSI: Kirim Data Sensor ke Server
-// Format JSON: {"sensor_type": "suhu", "value": 28.5}
+// Format JSON: {"var": "suhu", "val": 28.5}
 // ==========================================
 void kirimDataWebSocket(const char* sensor_type, float value) {
   
@@ -152,8 +153,8 @@ void kirimDataWebSocket(const char* sensor_type, float value) {
   }
 
   StaticJsonDocument<128> doc;
-  doc["sensor_type"] = sensor_type;
-  doc["value"] = value;
+  doc["var"] = sensor_type;
+  doc["val"] = value;
 
   String jsonString;
   serializeJson(doc, jsonString);
@@ -275,13 +276,13 @@ void loop() {
   5. Device pode agora enviar dados
   
   SENSOR DATA FORMAT (Device → Server):
-  {"sensor_type": "suhu", "value": 28.5}
-  {"sensor_type": "kelembapan", "value": 65.2}
-  {"sensor_type": "potensiometer", "value": 45.3}
+  {"var": "suhu", "val": 28.5}
+  {"var": "kelembapan", "val": 65.2}
+  {"var": "potensiometer", "val": 45.3}
   
   COMMAND FORMAT (Server → Device):
-  {"sensor_type": "kondisi-led", "value": "true"}
-  {"sensor_type": "pwm-led", "value": "128"}
+  {"var": "kondisi-led", "val": "true"}
+  {"var": "pwm-led", "val": "128"}
   
   FEATURES:
   ✓ Manual Handshake Authentication (sem URL parameters)

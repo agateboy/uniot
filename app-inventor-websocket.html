@@ -36,6 +36,7 @@
         var logDiv = document.getElementById("log");
         var messageQueue = [];
         var connectionStatus = "IDLE";
+        var authenticatedDeviceId = null;
         
         // Fungsi untuk mencetak tulisan ke layar HP dengan timestamp
         function printLog(pesan, tipe = 'normal') { 
@@ -78,6 +79,10 @@
                 
                 // Handle berbagai tipe respons dari server
                 if (json.status === 'success' || json.status === 'ack') {
+                    if (json.status === 'success' && json.device_id !== undefined) {
+                        authenticatedDeviceId = json.device_id;
+                        printLog("Auth device_id: " + authenticatedDeviceId, 'success');
+                    }
                     // ACK atau respons sukses
                     printLog("✓ " + json.message, 'success');
                     sendToApp("ACK:" + rawData);
@@ -135,6 +140,7 @@
                         
                         ws.onclose = function() { 
                             connectionStatus = "DISCONNECTED";
+                            authenticatedDeviceId = null;
                             printLog("[!] WS TERPUTUS", 'error'); 
                             sendToApp("STATUS:DISCONNECTED");
                         };
@@ -154,10 +160,28 @@
                     else if (perintah.startsWith("SEND:")) {
                         printLog("CMD: SENDING...", 'warn');
                         var pesan = perintah.substring(5);
+                        var payloadToSend = pesan;
+
+                        // Auto-route command kontrol agar server meneruskan ke device fisik.
+                        try {
+                            var jsonToSend = JSON.parse(pesan);
+                            var hasVarVal = jsonToSend && jsonToSend.var !== undefined && jsonToSend.val !== undefined;
+                            var hasDeviceId = jsonToSend && jsonToSend.device_id !== undefined;
+                            var shouldAutoRoute = hasVarVal && (jsonToSend.type === undefined || jsonToSend.type === "command");
+
+                            if (shouldAutoRoute && !hasDeviceId && authenticatedDeviceId !== null) {
+                                jsonToSend.type = "command";
+                                jsonToSend.device_id = authenticatedDeviceId;
+                                payloadToSend = JSON.stringify(jsonToSend);
+                                printLog("Auto command route: device_id=" + authenticatedDeviceId, 'info');
+                            }
+                        } catch (e) {
+                            // Jika bukan JSON valid, kirim payload asli.
+                        }
                         
                         if (ws && ws.readyState === WebSocket.OPEN) {
-                            printLog("Sending: " + pesan.substring(0, 50), 'info');
-                            ws.send(pesan);
+                            printLog("Sending: " + payloadToSend.substring(0, 50), 'info');
+                            ws.send(payloadToSend);
                             sendToApp("SENT:OK");
                         } else {
                             printLog("WS not connected!", 'error');
