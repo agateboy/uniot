@@ -7,7 +7,7 @@ When multiple App Inventor instances connected with the **same secret key**, cha
 - Device A (App Inventor) connects with secret key `abc123`
 - Device B (App Inventor) connects with same secret key `abc123`
 - Device A changes humidity variable
-- ❌ Result: Dashboard updates, but Device B does NOT receive the change
+-  Result: Dashboard updates, but Device B does NOT receive the change
 
 ## Root Cause
 The server had TWO critical issues:
@@ -111,11 +111,11 @@ Dashboard commands are now sent to **ALL connected instances** of a device.
 5. Check: Does dashboard show the new value? ✓
 
 ### Expected Results
-- ✅ Tab 1 broadcasts update to Tab 2 via `broadcastToAllDevices()`
-- ✅ Tab 2 receives `dataUpdate` message and updates its display
-- ✅ Dashboard receives update via `broadcastToUserDashboards()`
-- ✅ Dashboard slider/gauge reflects the change
-- ✅ Public view updates via SSE
+-  Tab 1 broadcasts update to Tab 2 via `broadcastToAllDevices()`
+-  Tab 2 receives `dataUpdate` message and updates its display
+-  Dashboard receives update via `broadcastToUserDashboards()`
+-  Dashboard slider/gauge reflects the change
+-  Public view updates via SSE
 
 ### Debug Information
 When debugging, the server logs show:
@@ -136,11 +136,11 @@ When debugging, the server logs show:
 | Device-to-Device Sync | Worked but incomplete | Works with all instances | Complete multi-device sync |
 
 ## Backward Compatibility
-✅ Single device instances still work exactly the same  
-✅ Dashboard connections unaffected  
-✅ Public view connections unaffected  
-✅ All broadcast functions work correctly  
-✅ No database schema changes needed
+ Single device instances still work exactly the same  
+ Dashboard connections unaffected  
+ Public view connections unaffected  
+ All broadcast functions work correctly  
+ No database schema changes needed
 
 ## Files Modified
 - [index.js](index.js) - Device authentication (line 806-807), connection closure logic (removed 808-814), dashboard command routing (lines 716-737)

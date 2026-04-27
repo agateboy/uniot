@@ -6,23 +6,23 @@ Sistem UNIOT telah dirombak dari **HTTP Polling + Socket.IO** menjadi **Pure Web
 
 ---
 
-## ✅ Perubahan Utama
+##  Perubahan Utama
 
 ### Backend (index.js)
 
 #### Dihapus:
-- ❌ Library Socket.IO (`require("socket.io")`)
-- ❌ Rute HTTP `POST /api/data` (untuk mengumpulkan data dari ESP32)
-- ❌ Requirement header `x-api-key` dalam HTTP request
-- ❌ Express middleware Socket.IO CORS setup
+-  Library Socket.IO (`require("socket.io")`)
+-  Rute HTTP `POST /api/data` (untuk mengumpulkan data dari ESP32)
+-  Requirement header `x-api-key` dalam HTTP request
+-  Express middleware Socket.IO CORS setup
 
 #### Ditambahkan:
-- ✅ Library `ws` (native WebSocket untuk Node.js)
-- ✅ WebSocket Server (broker) yang routing data real-time
-- ✅ Authentikasi via query parameter pada koneksi WebSocket:
+-  Library `ws` (native WebSocket untuk Node.js)
+-  WebSocket Server (broker) yang routing data real-time
+-  Authentikasi via query parameter pada koneksi WebSocket:
   - ESP32: `ws://...?api_key=[YOUR_API_KEY]`
   - Dashboard: `ws://...?token=[JWT_TOKEN]`
-- ✅ Maps untuk tracking connected clients:
+-  Maps untuk tracking connected clients:
   - `connectedClients`: Menyimpan semua koneksi aktif (device & dashboard)
   - `userConnections`: Menyimpan mapping user → dashboard connections (untuk multi-tab)
 
@@ -34,15 +34,15 @@ Sistem UNIOT telah dirombak dari **HTTP Polling + Socket.IO** menjadi **Pure Web
 ### Frontend (dashboard.html)
 
 #### Dihapus:
-- ❌ Script tag: `<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>`
-- ❌ Socket.IO event listeners: `socket.emit()`, `socket.on()`
-- ❌ Socket.IO connection setup: `io(API_BASE, { auth: { token } })`
+-  Script tag: `<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>`
+-  Socket.IO event listeners: `socket.emit()`, `socket.on()`
+-  Socket.IO connection setup: `io(API_BASE, { auth: { token } })`
 
 #### Ditambahkan:
-- ✅ Native WebSocket connection: `new WebSocket(wsUrl)`
-- ✅ `ws.onmessage` handler untuk menerima data dari server
-- ✅ `ws.send(JSON.stringify(data))` untuk mengirim commands
-- ✅ Auto-reconnect logic (3 detik jika koneksi putus)
+-  Native WebSocket connection: `new WebSocket(wsUrl)`
+-  `ws.onmessage` handler untuk menerima data dari server
+-  `ws.send(JSON.stringify(data))` untuk mengirim commands
+-  Auto-reconnect logic (3 detik jika koneksi putus)
 
 #### Event Handlers Update:
 **Toggle Switch:**
@@ -165,7 +165,7 @@ Server mengirim ke ESP32 (simplified):
 | **Overhead** | ~40KB library | ~13KB library |
 | **Latency** | Medium | Sangat rendah |
 | **Kompleksitas** | High | Low |
-| **Real-time** | ✅ | ✅ |
+| **Real-time** |  |  |
 | **Polling fallback** | Ada | Tidak perlu |
 | **Custom protocol** | Sulit | Mudah |
 | **Deployment** | Kompleks | Sederhana |
@@ -233,13 +233,13 @@ Lihat file [WEBSOCKET_PROTOCOL.md](./WEBSOCKET_PROTOCOL.md) untuk:
 ## ⚠️ Breaking Changes
 
 ### Untuk Pengguna:
-- ❌ Jika menggunakan library Socket.IO di custom client, harus update ke native WebSocket
-- ✅ Dashboard dan public-view sudah otomatis update
+-  Jika menggunakan library Socket.IO di custom client, harus update ke native WebSocket
+-  Dashboard dan public-view sudah otomatis update
 
 ### Untuk ESP32:
-- ❌ Rute HTTP POST `/api/data` sudah dihapus, harus ganti ke WebSocket
-- ❌ Header `x-api-key` tidak lagi dikirim via HTTP, pakai query parameter di WebSocket URL
-- ✅ Format JSON tetap mirip, tinggal hapus field yang tidak perlu
+-  Rute HTTP POST `/api/data` sudah dihapus, harus ganti ke WebSocket
+-  Header `x-api-key` tidak lagi dikirim via HTTP, pakai query parameter di WebSocket URL
+-  Format JSON tetap mirip, tinggal hapus field yang tidak perlu
 
 **Contoh update ESP32:**
 
@@ -283,11 +283,11 @@ Sekarang dengan WebSocket murni, beberapa fitur baru lebih mudah diimplementasi:
 ## 🎉 Kesimpulan
 
 Migrasi ke Pure WebSocket Tunneling membuat sistem:
-- ✅ **Lebih sederhana** (1 library WebSocket vs 2 library Socket.IO + Express static)
-- ✅ **Lebih cepat** (latency lebih rendah, no overhead)
-- ✅ **Lebih fleksibel** (mudah customize protocol)
-- ✅ **Lebih mudah debug** (JSON plain text, bukan black box)
-- ✅ **Production-ready** (scalable & reliable)
+-  **Lebih sederhana** (1 library WebSocket vs 2 library Socket.IO + Express static)
+-  **Lebih cepat** (latency lebih rendah, no overhead)
+-  **Lebih fleksibel** (mudah customize protocol)
+-  **Lebih mudah debug** (JSON plain text, bukan black box)
+-  **Production-ready** (scalable & reliable)
 
 Selamat dengan upgrade sistem IoT Anda! 🚀
 

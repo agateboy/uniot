@@ -37,7 +37,7 @@ const wss = new WebSocket.Server({ server });
 const port = Number(process.env.PORT) || 3001;
 const localIp = process.env.LOCAL_IP || '127.0.0.1';
 
-// ⭐ MESSAGE QUEUE SYSTEM: Async processing untuk mencegah message bottleneck
+// MESSAGE QUEUE SYSTEM: Async processing untuk mencegah message bottleneck
 class MessageQueue {
     constructor(maxConcurrent = 50) {
         this.queue = [];
@@ -92,7 +92,7 @@ const messageQueue = new MessageQueue(50); // Max 50 concurrent - ditingkatkan d
 const allConnections = new Map(); // Map<connClientKey, { type: 'device'|'dashboard', ws, deviceName?, userId? }>
 const secretKeyRegistry = new Map(); // Map<secretKey, { device_id, device_name, user_id }>
 
-// ⭐ SENSOR DATA BUFFER: Batch insert untuk mencegah database lock pada sensor data tinggi
+// SENSOR DATA BUFFER: Batch insert untuk mencegah database lock pada sensor data tinggi
 class SensorDataBuffer {
     constructor(flushInterval = 2000, maxBuffer = 100) {
         this.buffer = [];
@@ -262,7 +262,7 @@ const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite'), (err) =
                 return;
             }
 
-            console.log(`📝 Generating secret_keys for ${devicesWithoutKey.length} devices...`);
+            console.log(`Generating secret_keys for ${devicesWithoutKey.length} devices...`);
             let completed = 0;
             
             devicesWithoutKey.forEach(device => {
@@ -627,7 +627,7 @@ wss.on('connection', (ws, req) => {
     };
 
     const persistControlState = (targetDeviceId, sensor_type, value) => {
-        // ⭐ PRIORITAS 1: Update widget immediately (untuk UI responsiveness)
+        // PRIORITAS 1: Update widget immediately (untuk UI responsiveness)
         db.run(
             'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
             [value, targetDeviceId, sensor_type],
@@ -640,10 +640,10 @@ wss.on('connection', (ws, req) => {
             }
         );
 
-        // ⭐ PRIORITAS 2: Buffer sensor data (non-blocking)
+        // PRIORITAS 2: Buffer sensor data (non-blocking)
         sensorDataBuffer.add(targetDeviceId, sensor_type, value);
 
-        // ⭐ PRIORITAS 3: Async broadcast (non-blocking)
+        // PRIORITAS 3: Async broadcast (non-blocking)
         setImmediate(async () => {
             db.get('SELECT public_slug FROM devices WHERE device_id = ?', [targetDeviceId], (slugErr, deviceRow) => {
                 if (!slugErr && deviceRow && deviceRow.public_slug) {
@@ -739,7 +739,7 @@ wss.on('connection', (ws, req) => {
 
             console.log(`[WebSocket Message] Dari ${clientType || 'unknown'} (Type: ${messageType}, Priority: ${messagePriority})`);
 
-            // ⭐ ENQUEUE ke message queue untuk async processing
+            // ENQUEUE ke message queue untuk async processing
             messageQueue.enqueue(async () => {
                 // === HANDSHAKE AUTH UNTUK DEVICES YANG MENUNGGU ===
                 if (clientType === 'device' && authStatus === 'pending') {
@@ -802,7 +802,7 @@ wss.on('connection', (ws, req) => {
                     }
                     else {
                         // Pesan tidak valid saat menunggu
-                        console.log(`[⚠️  Device] Pesan tidak valid saat handshake`);
+                        console.log(`[Device] Pesan tidak valid saat handshake`);
                         ws.send(JSON.stringify({ 
                             status: 'error', 
                             message: 'Kirim {"action":"auth","key":"..."} untuk authenticating' 
@@ -857,7 +857,7 @@ wss.on('connection', (ws, req) => {
                         message: 'Data berhasil diterima'
                     }));
                     
-                    // ⭐ PRIORITAS 1: Broadcast realtime (LANGSUNG, tidak di-buffer)
+                    //  PRIORITAS 1: Broadcast realtime (LANGSUNG, tidak di-buffer)
                     // Jadi dashboard lihat update immediately
                     broadcastToUserDashboards(userId, {
                         device: deviceName,
@@ -867,10 +867,10 @@ wss.on('connection', (ws, req) => {
                         timestamp: new Date().toISOString()
                     });
                     
-                    // ⭐ PRIORITAS 2: Buffer sensor data untuk batch insert (tidak blocking)
+                    //  PRIORITAS 2: Buffer sensor data untuk batch insert (tidak blocking)
                     sensorDataBuffer.add(deviceId, sensor_type, value);
                     
-                    // ⭐ PRIORITAS 3: Update widget & broadcast (async, non-blocking)
+                    //  PRIORITAS 3: Update widget & broadcast (async, non-blocking)
                     setImmediate(async () => {
                         db.run(
                             'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
@@ -921,7 +921,7 @@ wss.on('connection', (ws, req) => {
                     persistControlState(device_id, sensor_type, value);
                     routeCommandToDeviceInstances('dashboard', device_id, sensor_type, value, ws);
                 }
-            }, messagePriority); // ⭐ Dengan priority sesuai tipe message
+            }, messagePriority); //  Dengan priority sesuai tipe message
 
         } catch (parseErr) {
             console.error('[WebSocket] Parse error:', parseErr.message);
@@ -1028,12 +1028,12 @@ wss.on('connection', (ws, req) => {
         authStatus: 'pending'
     });
     
-    console.log(`[⏳ Device] Menunggu - Menunggu autentikasi...`);
+    console.log(`[ Device] Menunggu - Menunggu autentikasi...`);
     
     // === TIMEOUT: 20 detik untuk mengirim auth message ===
     authTimeout = setTimeout(() => {
         if (allConnections.has(connClientKey) && authStatus === 'pending') {
-            console.log(`[✗ Device] ⏱️  Timeout autentikasi (tidak ada pesan yang diterima)`);
+            console.log(`[✗ Device]   Timeout autentikasi (tidak ada pesan yang diterima)`);
             ws.close(1008, 'Autentikasi timeout - kirim {"action":"auth","key":"..."} untuk authenticate');
             allConnections.delete(connClientKey);
         }
@@ -1293,11 +1293,11 @@ function broadcastToPublicView(slug, data) {
 // --- JALANKAN SERVER ---
 // server sudah wrap app dengan http.createServer(app), jadi cukup server.listen() saja
 server.listen(port, '0.0.0.0', () => {
-    console.log(`\n✅ Server (Express + WebSocket) berjalan di http://0.0.0.0:${port}`);
-    console.log(`✅ WebSocket berjalan di ws://0.0.0.0:${port}`);
-    console.log(`\n📡 Akses dari jaringan lokal: http://${localIp}:${port}`);
-    console.log(`📡 Akses dari device lain: http://<IP_ROUTER_ANDA>:${port}`);
-    console.log(`\n💡 Jika tidak bisa akses:`);
+    console.log(`\n Server (Express + WebSocket) berjalan di http://0.0.0.0:${port}`);
+    console.log(` WebSocket berjalan di ws://0.0.0.0:${port}`);
+    console.log(`\n Akses dari jaringan lokal: http://${localIp}:${port}`);
+    console.log(` Akses dari device lain: http://<IP_ROUTER_ANDA>:${port}`);
+    console.log(`\n Jika tidak bisa akses:`);
     console.log(`   1. Cek IP router: ${localIp}`);
     console.log(`   2. Pastikan device lain di jaringan yang sama`);
     console.log(`   3. Check firewall router (port 3001 harus terbuka)`);
