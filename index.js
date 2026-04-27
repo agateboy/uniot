@@ -39,43 +39,123 @@ const localIp = process.env.LOCAL_IP || '127.0.0.1';
 
 // ⭐ MESSAGE QUEUE SYSTEM: Async processing untuk mencegah message bottleneck
 class MessageQueue {
-    constructor(maxConcurrent = 10) {
+    constructor(maxConcurrent = 50) {
         this.queue = [];
         this.processing = 0;
         this.maxConcurrent = maxConcurrent;
+        this.priorityQueues = new Map(); // Separate queues per priority level
+        this.activeByPriority = new Map();
     }
 
     // Tambah message ke queue dengan priority (command = priority 1, data = priority 0)
     enqueue(message, priority = 0) {
-        this.queue.push({ message, priority });
-        // Sort by priority (higher priority first)
-        this.queue.sort((a, b) => b.priority - a.priority);
+        if (!this.priorityQueues.has(priority)) {
+            this.priorityQueues.set(priority, []);
+            this.activeByPriority.set(priority, 0);
+        }
+        this.priorityQueues.get(priority).push(message);
         this.process();
     }
 
     async process() {
         if (this.processing >= this.maxConcurrent) return;
-        if (this.queue.length === 0) return;
 
-        this.processing++;
-        const item = this.queue.shift();
-
-        try {
-            await item.message();
-        } catch (error) {
-            console.error('[Queue] Error processing message:', error);
+        // Process high priority first (priority 1 = commands)
+        for (const priority of [1, 0]) {
+            const queue = this.priorityQueues.get(priority);
+            if (!queue || queue.length === 0) continue;
+            
+            const activeCount = this.activeByPriority.get(priority) || 0;
+            if (activeCount >= Math.ceil(this.maxConcurrent / 2)) continue; // Reserve slots for commands
+            
+            this.processing++;
+            this.activeByPriority.set(priority, activeCount + 1);
+            const message = queue.shift();
+            
+            try {
+                await message();
+            } catch (error) {
+                console.error('[Queue] Error processing priority', priority, ':', error);
+            }
+            
+            this.activeByPriority.set(priority, activeCount);
+            this.processing--;
+            this.process();
+            return;
         }
-
-        this.processing--;
-        this.process(); // Process next message
     }
 }
 
-const messageQueue = new MessageQueue(15); // Max 15 concurrent message processing
+const messageQueue = new MessageQueue(50); // Max 50 concurrent - ditingkatkan dari 15
 
 // Storage untuk tracking connected clients
 const allConnections = new Map(); // Map<connClientKey, { type: 'device'|'dashboard', ws, deviceName?, userId? }>
 const secretKeyRegistry = new Map(); // Map<secretKey, { device_id, device_name, user_id }>
+
+// ⭐ SENSOR DATA BUFFER: Batch insert untuk mencegah database lock pada sensor data tinggi
+class SensorDataBuffer {
+    constructor(flushInterval = 2000, maxBuffer = 100) {
+        this.buffer = [];
+        this.flushInterval = flushInterval;
+        this.maxBuffer = maxBuffer;
+        this.timer = null;
+        this.lastFlush = Date.now();
+    }
+
+    add(deviceId, sensorType, value) {
+        this.buffer.push({ deviceId, sensorType, value, timestamp: new Date() });
+        if (this.buffer.length >= this.maxBuffer) {
+            this.flush();
+        } else if (!this.timer) {
+            this.timer = setTimeout(() => this.flush(), this.flushInterval);
+        }
+    }
+
+    flush() {
+        if (this.buffer.length === 0) {
+            if (this.timer) {
+                clearTimeout(this.timer);
+                this.timer = null;
+            }
+            return;
+        }
+
+        const batch = this.buffer.splice(0);
+        console.log(`[SensorBuffer] Flushing ${batch.length} sensor data to database...`);
+
+        // Batch insert sebagai single transaction
+        db.run('BEGIN TRANSACTION', (beginErr) => {
+            if (beginErr) {
+                console.error('[SensorBuffer] Transaction error:', beginErr);
+                return;
+            }
+
+            let completed = 0;
+            batch.forEach(({ deviceId, sensorType, value, timestamp }) => {
+                db.run(
+                    'INSERT INTO sensor_data (device_id, sensor_type, value, timestamp) VALUES (?, ?, ?, ?)',
+                    [deviceId, sensorType, value, timestamp.toISOString()],
+                    (err) => {
+                        completed++;
+                        if (err) console.error('[SensorBuffer] Insert error:', err);
+                        if (completed === batch.length) {
+                            db.run('COMMIT', (commitErr) => {
+                                if (commitErr) {
+                                    console.error('[SensorBuffer] Commit error:', commitErr);
+                                } else {
+                                    console.log(`[✓ SensorBuffer] ${batch.length} data points saved`);
+                                }
+                                this.timer = null;
+                            });
+                        }
+                    }
+                );
+            });
+        });
+    }
+}
+
+const sensorDataBuffer = new SensorDataBuffer(2000, 100);
 
 // Middleware
 app.use(cors());
@@ -547,6 +627,7 @@ wss.on('connection', (ws, req) => {
     };
 
     const persistControlState = (targetDeviceId, sensor_type, value) => {
+        // ⭐ PRIORITAS 1: Update widget immediately (untuk UI responsiveness)
         db.run(
             'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
             [value, targetDeviceId, sensor_type],
@@ -554,46 +635,39 @@ wss.on('connection', (ws, req) => {
                 if (err) {
                     console.error('Error updating widget from control:', err);
                 } else {
-                    console.log(`[✓ Database] Widget updated dari control: ${sensor_type} = ${value}`);
+                    console.log(`[✓ Control] Widget updated: ${sensor_type} = ${value}`);
                 }
             }
         );
 
-        db.run(
-            'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
-            [targetDeviceId, sensor_type, value],
-            (err) => {
-                if (err) {
-                    console.error('Kesalahan saat menyimpan sensor data dari control:', err);
-                } else {
-                    console.log(`[✓ Database] Sensor data saved from control: device ${targetDeviceId}, ${sensor_type} = ${value}`);
+        // ⭐ PRIORITAS 2: Buffer sensor data (non-blocking)
+        sensorDataBuffer.add(targetDeviceId, sensor_type, value);
 
-                    db.get('SELECT public_slug FROM devices WHERE device_id = ?', [targetDeviceId], (slugErr, deviceRow) => {
-                        if (!slugErr && deviceRow && deviceRow.public_slug) {
-                            broadcastToPublicView(deviceRow.public_slug, {
-                                type: 'dataUpdate',
-                                sensor_type: sensor_type,
-                                current_value: value,
-                                timestamp: new Date().toISOString()
-                            });
-                        }
-                    });
-
-                    // Sinkronisasi realtime ke dashboard pemilik device.
-                    db.get('SELECT user_id, device_name FROM devices WHERE device_id = ?', [targetDeviceId], (ownerErr, ownerRow) => {
-                        if (!ownerErr && ownerRow) {
-                            broadcastToUserDashboards(ownerRow.user_id, {
-                                device: ownerRow.device_name,
-                                device_id: Number(targetDeviceId),
-                                var: sensor_type,
-                                val: value,
-                                timestamp: new Date().toISOString()
-                            });
-                        }
+        // ⭐ PRIORITAS 3: Async broadcast (non-blocking)
+        setImmediate(async () => {
+            db.get('SELECT public_slug FROM devices WHERE device_id = ?', [targetDeviceId], (slugErr, deviceRow) => {
+                if (!slugErr && deviceRow && deviceRow.public_slug) {
+                    broadcastToPublicView(deviceRow.public_slug, {
+                        type: 'dataUpdate',
+                        sensor_type: sensor_type,
+                        current_value: value,
+                        timestamp: new Date().toISOString()
                     });
                 }
-            }
-        );
+            });
+
+            db.get('SELECT user_id, device_name FROM devices WHERE device_id = ?', [targetDeviceId], (ownerErr, ownerRow) => {
+                if (!ownerErr && ownerRow) {
+                    broadcastToUserDashboards(ownerRow.user_id, {
+                        device: ownerRow.device_name,
+                        device_id: Number(targetDeviceId),
+                        var: sensor_type,
+                        val: value,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            });
+        });
     };
 
     const routeCommandToDeviceInstances = (senderLabel, targetDeviceId, sensor_type, value, senderWs, excludeConnKey = null) => {
@@ -783,62 +857,53 @@ wss.on('connection', (ws, req) => {
                         message: 'Data berhasil diterima'
                     }));
                     
-                    // ⭐ ASYNC: Simpan di database (tidak blocking)
-                    db.run(
-                        'INSERT INTO sensor_data (device_id, sensor_type, value) VALUES (?, ?, ?)',
-                        [deviceId, sensor_type, value],
-                        (err) => {
-                            if (err) {
-                                console.error('Kesalahan saat menyimpan sensor data:', err);
-                            } else {
-                                console.log(`[✓ Database] Sensor data tersimpan: device ${deviceId}, ${sensor_type} = ${value}`);
-                            }
-                        }
-                    );
+                    // ⭐ PRIORITAS 1: Broadcast realtime (LANGSUNG, tidak di-buffer)
+                    // Jadi dashboard lihat update immediately
+                    broadcastToUserDashboards(userId, {
+                        device: deviceName,
+                        device_id: deviceId,
+                        var: sensor_type,
+                        val: value,
+                        timestamp: new Date().toISOString()
+                    });
                     
-                    // Update widget current_value di database (jika widget ada)
-                    db.run(
-                        'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
-                        [value, deviceId, sensor_type],
-                        (err) => {
-                            if (err) {
-                                console.error('Error updating widget current_value:', err);
-                            } else {
-                                console.log(`[✓ Database] Widget current_value updated: ${sensor_type} = ${value}`);
-                                
-                                // Broadcast ke PUBLIC VIEW
-                                db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
-                                    if (!err && deviceRow && deviceRow.public_slug) {
-                                        broadcastToPublicView(deviceRow.public_slug, {
-                                            type: 'dataUpdate',
-                                            sensor_type: sensor_type,
-                                            current_value: value,
-                                            timestamp: new Date().toISOString()
-                                        });
-                                    }
-                                });
-                                
-                                // Broadcast ke DASHBOARD (user yang punya device ini)
-                                broadcastToUserDashboards(userId, {
-                                    device: deviceName,
-                                    device_id: deviceId,
-                                    var: sensor_type,
-                                    val: value,
-                                    timestamp: new Date().toISOString()
-                                });
-                                
-                                // Broadcast ke semua DEVICES lain yang terhubung (untuk sync)
-                                broadcastToAllDevices({
-                                    type: 'dataUpdate',
-                                    device_id: deviceId,
-                                    device_name: deviceName,
-                                    var: sensor_type,
-                                    val: value,
-                                    timestamp: new Date().toISOString()
-                                }, connClientKey); // Exclude hanya sender connection (by unique key)
+                    // ⭐ PRIORITAS 2: Buffer sensor data untuk batch insert (tidak blocking)
+                    sensorDataBuffer.add(deviceId, sensor_type, value);
+                    
+                    // ⭐ PRIORITAS 3: Update widget & broadcast (async, non-blocking)
+                    setImmediate(async () => {
+                        db.run(
+                            'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
+                            [value, deviceId, sensor_type],
+                            (err) => {
+                                if (!err) {
+                                    console.log(`[✓ Widget] ${sensor_type} = ${value}`);
+                                    
+                                    // Broadcast ke PUBLIC VIEW
+                                    db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
+                                        if (!err && deviceRow && deviceRow.public_slug) {
+                                            broadcastToPublicView(deviceRow.public_slug, {
+                                                type: 'dataUpdate',
+                                                sensor_type: sensor_type,
+                                                current_value: value,
+                                                timestamp: new Date().toISOString()
+                                            });
+                                        }
+                                    });
+                                    
+                                    // Broadcast ke DEVICES lain
+                                    broadcastToAllDevices({
+                                        type: 'dataUpdate',
+                                        device_id: deviceId,
+                                        device_name: deviceName,
+                                        var: sensor_type,
+                                        val: value,
+                                        timestamp: new Date().toISOString()
+                                    }, connClientKey);
+                                }
                             }
-                        }
-                    );
+                        );
+                    });
                 }
                 
                 // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE (PRIORITAS TINGGI) ---
@@ -1226,7 +1291,15 @@ function broadcastToPublicView(slug, data) {
 }
 
 // --- JALANKAN SERVER ---
+// server sudah wrap app dengan http.createServer(app), jadi cukup server.listen() saja
 server.listen(port, '0.0.0.0', () => {
-    console.log(`Server (Express + WebSocket) berjalan di http://localhost:${port}`);
-    console.log(`Akses dari jaringan lokal: http://${localIp}:${port}`);
+    console.log(`\n✅ Server (Express + WebSocket) berjalan di http://0.0.0.0:${port}`);
+    console.log(`✅ WebSocket berjalan di ws://0.0.0.0:${port}`);
+    console.log(`\n📡 Akses dari jaringan lokal: http://${localIp}:${port}`);
+    console.log(`📡 Akses dari device lain: http://<IP_ROUTER_ANDA>:${port}`);
+    console.log(`\n💡 Jika tidak bisa akses:`);
+    console.log(`   1. Cek IP router: ${localIp}`);
+    console.log(`   2. Pastikan device lain di jaringan yang sama`);
+    console.log(`   3. Check firewall router (port 3001 harus terbuka)`);
+    console.log(`   4. Coba akses: http://${localIp}:${port}/\n`);
 });
