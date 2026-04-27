@@ -357,7 +357,7 @@
                 </div>
                 
                 <p style="font-size: 0.9em; margin: 8px 0; background: #f8fff9; padding: 8px; border-left: 3px solid #42b72a; border-radius: 2px;">
-                    <strong>⚠️ Simpan secret key ini dengan aman!</strong> Anda akan membutuhkannya untuk mengkonfigurasi ESP32 Anda. Secret key ini tidak akan ditampilkan lagi.
+                    <strong>Simpan secret key ini dengan aman!</strong> Anda akan membutuhkannya untuk mengkonfigurasi ESP32 Anda. Secret key ini tidak akan ditampilkan lagi.
                 </p>
             </div>
         </div>
@@ -502,7 +502,7 @@
             };
             
             ws.onclose = () => {
-                console.log('⚠️ WebSocket connection closed');
+                console.log('WebSocket connection closed');
                 // Auto-reconnect dalam 3 detik
                 setTimeout(connectWebSocket, 3000);
             };
@@ -1053,7 +1053,7 @@
                     const widget = allUserWidgets.find(w => w.widget_id == widgetId);
                     if (!widget) return;
                     
-                    console.log(`📤 Toggle "${widget.sensor_type}": ${newState}`);
+                    console.log(` Toggle "${widget.sensor_type}": ${newState}`);
                     
                     // Format JSON untuk WebSocket Tunneling
                     const command = {
@@ -1066,7 +1066,7 @@
                         ws.send(JSON.stringify(command));
                         widget.current_value = newState;
                     } else {
-                        console.error('⚠️ WebSocket tidak terhubung');
+                        console.error('WebSocket tidak terhubung');
                     }
                 }
 
@@ -1083,7 +1083,7 @@
                     const widget = allUserWidgets.find(w => w.widget_id == widgetId);
                     if (!widget) return;
                     
-                    console.log(`📤 Slider "${widget.sensor_type}": ${newValue}`);
+                    console.log(` Slider "${widget.sensor_type}": ${newValue}`);
                     
                     // Format JSON untuk WebSocket Tunneling
                     const command = {
@@ -1096,7 +1096,7 @@
                         ws.send(JSON.stringify(command));
                         widget.current_value = newValue;
                     } else {
-                        console.error('⚠️ WebSocket tidak terhubung');
+                        console.error('WebSocket tidak terhubung');
                     }
                 }
             });

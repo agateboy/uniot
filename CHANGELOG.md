@@ -220,7 +220,7 @@ Akses dari jaringan lokal: http://192.168.x.x:3001
 - Buka browser: `http://localhost:3001/login.html`
 - Login dengan user yang sebelumnya
 - Buka console (F12) → seharusnya ada log: `✓ WebSocket terhubung ke server!`
-- Test: klik tombol/slider → seharusnya ada log: `📤 Mengirim Toggle/Slider: ...`
+- Test: klik tombol/slider → seharusnya ada log: ` Mengirim Toggle/Slider: ...`
 
 ### 4. Update ESP32 Code
 Lihat file [WEBSOCKET_PROTOCOL.md](./WEBSOCKET_PROTOCOL.md) untuk:
@@ -230,7 +230,7 @@ Lihat file [WEBSOCKET_PROTOCOL.md](./WEBSOCKET_PROTOCOL.md) untuk:
 
 ---
 
-## ⚠️ Breaking Changes
+## Breaking Changes
 
 ### Untuk Pengguna:
 -  Jika menggunakan library Socket.IO di custom client, harus update ke native WebSocket

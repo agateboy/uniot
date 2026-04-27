@@ -845,7 +845,7 @@ wss.on('connection', (ws, req) => {
                         return;
                     }
                     
-                    console.log(`[Device "${deviceName}"] 📤 Data: ${sensor_type} = ${value}`);
+                    console.log(`[Device "${deviceName}"]  Data: ${sensor_type} = ${value}`);
                     
                     // Kirim ACK kembali ke device bahwa data diterima
                     ws.send(JSON.stringify({
@@ -1061,7 +1061,7 @@ function broadcastToUserDashboards(userId, data) {
     });
     
     if (broadcastCount === 0) {
-        console.log(`[Broadcast] ⚠️ Tidak ada dashboard aktif untuk user ID ${userId}`);
+        console.log(`[Broadcast] Tidak ada dashboard aktif untuk user ID ${userId}`);
     } else {
         console.log(`[Broadcast] ✓ Data dikirim ke ${broadcastCount} dashboard`);
     }
@@ -1097,7 +1097,7 @@ function broadcastToAllDevices(data, excludeConnKey = null) {
     });
     
     if (broadcastCount === 0) {
-        console.log(`[Device Broadcast] ⚠️ Tidak ada device aktif untuk broadcast`);
+        console.log(`[Device Broadcast] Tidak ada device aktif untuk broadcast`);
     } else {
         console.log(`[Device Broadcast] ✓ Data dikirim ke ${broadcastCount} device`);
     }

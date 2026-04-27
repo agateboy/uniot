@@ -23,7 +23,7 @@ const char* password = "seturanyogyakarta";
 // ==========================================
 const char* ws_host = "192.168.110.152";  // IP Server UNIOT
 const int ws_port = 3001;               // Port Server
-const char* secret_key = "Wnx3UH";      // ⚠️ GANTI dengan secret key dari dashboard (6 karakter)
+const char* secret_key = "Wnx3UH";      // GANTI dengan secret key dari dashboard (6 karakter)
 
 // ==========================================
 // INISIALISASI GLOBAL
@@ -143,7 +143,7 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 // ==========================================
-// 📤 FUNGSI PUBLISHER: Kirim Data Sensor
+//  FUNGSI PUBLISHER: Kirim Data Sensor
 // ==========================================
 void kirimDataWebSocket(const char* sensor_type, float value) {
   if (!isConnected) return; // Jangan buang memori jika belum konek
