@@ -46,6 +46,67 @@
             gap: 25px;
         }
 
+        .main-nav {
+            position: relative;
+        }
+
+        .doc-menu {
+            position: relative;
+        }
+
+        .doc-menu summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            color: #007bff;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .doc-menu summary:hover {
+            background-color: #f0f2f5;
+        }
+
+        .doc-menu summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .doc-menu[open] summary {
+            background-color: #f0f2f5;
+        }
+
+        .doc-links {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 0.5rem);
+            background-color: #ffffff;
+            border: 1px solid #dddfe2;
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+            padding: 0.75rem;
+            min-width: 240px;
+            z-index: 1000;
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .doc-links a {
+            display: block;
+            color: #1c1e21;
+            text-decoration: none;
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .doc-links a:hover {
+            background-color: #e9ecef;
+        }
+
         /* --- CSS BARU UNTUK NAVIGASI --- */
         
         /* Style Default (Tidak Aktif) */
@@ -203,6 +264,17 @@
             <ul>
                 <li><a href="index.html">Home</a></li>
                 <li><a href="about.html">About Us</a></li>
+                <li>
+                    <details class="doc-menu">
+                        <summary>Documentation</summary>
+                        <div class="doc-links">
+                            <a href="documentation/buku_panduan.pdf" target="_blank">Buku Panduan</a>
+                            <a href="documentation/jobsheet.pdf" target="_blank">Jobsheet</a>
+                            <a href="documentation/libraries.zip" download>Download Libraries.zip</a>
+                            <a href="documentation/WebSocket_Tester_1.0.4.apk" download>Download WebSocket_Tester_1.0.4.apk</a>
+                        </div>
+                    </details>
+                </li>
                 <li><a href="login.html">Login</a></li>
                 <li><a href="register.html" class="btn-register-nav">Register</a></li>
             </ul>
