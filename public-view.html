@@ -230,7 +230,7 @@
                 const contentDiv = div.querySelector('.widget-content');
                 const widgetData = data.filter(d => d.sensor_type === w.sensor_type);
 
-                if (w.widget_type === 'graph') {
+                    if (w.widget_type === 'graph' || w.widget_type === 'chart') {
                     // --- GRAPH ---
                     let canvas = contentDiv.querySelector('canvas');
                     let currentValDiv = contentDiv.querySelector('.current-value');

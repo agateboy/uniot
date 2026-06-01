@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - UNIOT</title>
+    <link rel="stylesheet" href="styles/global.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+        }
+
+        .login-box {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-box h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #fadbd8;
+            border-radius: 5px;
+            display: none;
+        }
+
+        /* Admin Panel Styles */
+        .admin-container {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+            background: #f5f5f5;
+        }
+
+        .admin-sidebar {
+            width: 250px;
+            background: white;
+            border-right: 1px solid #ddd;
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .admin-sidebar h2 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 18px;
+        }
+
+        .admin-sidebar .user-info {
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .logout-btn {
+            width: 100%;
+            padding: 10px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: #c0392b;
+        }
+
+        .admin-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .admin-header {
+            background: white;
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .admin-header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .admin-main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .users-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #ddd;
+            background: white;
+        }
+
+        .users-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 16px;
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+
+        .user-main {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .user-id-badge {
+            flex: 0 0 auto;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4f46e5;
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .user-meta {
+            min-width: 0;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #222;
+            line-height: 1.2;
+            word-break: break-word;
+        }
+
+        .user-email {
+            font-size: 13px;
+            color: #777;
+            margin-top: 2px;
+            word-break: break-word;
+        }
+
+        .secret-dropdown {
+            flex: 0 0 240px;
+            max-width: 240px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+
+        .secret-dropdown summary {
+            cursor: pointer;
+            font-size: 12px;
+            color: #065f46;
+            font-weight: 700;
+            list-style: none;
+        }
+
+        .secret-dropdown summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .secret-dropdown-content {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #d1d5db;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #111827;
+            word-break: break-all;
+            max-height: 140px;
+            overflow: auto;
+        }
+
+        .pagination {
+            padding: 15px 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            background: white;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+
+        .pagination button:hover {
+            background: #f5f5f5;
+        }
+
+        .pagination button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            padding: 8px 12px;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .ws-log-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .ws-log-header {
+            padding: 10px 15px;
+            background: #0d0d0d;
+            border-bottom: 1px solid #333;
+            color: #00ff00;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .clear-log-btn {
+            padding: 5px 10px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .clear-log-btn:hover {
+            background: #c0392b;
+        }
+
+        .ws-log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 15px;
+            background: #1e1e1e;
+        }
+
+        .log-entry {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #2d2d2d;
+            border-left: 3px solid #00ff00;
+            border-radius: 2px;
+            word-break: break-all;
+            white-space: pre-wrap;
+            font-size: 11px;
+        }
+
+        .log-entry.sent {
+            border-left-color: #3498db;
+        }
+
+        .log-entry.received {
+            border-left-color: #2ecc71;
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            color: #ff6b6b;
+        }
+
+        .log-timestamp {
+            color: #888;
+            font-size: 10px;
+            margin-bottom: 5px;
+        }
+
+        .log-meta {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+            font-size: 11px;
+        }
+
+        .log-badge {
+            background: #0b1220;
+            color: #9ae6b4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #183044;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .loading {
+            text-align: center;
+            color: #999;
+            padding: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .admin-main {
+                flex-direction: column;
+            }
+
+            .users-section {
+                border-right: none;
+                border-bottom: 1px solid #ddd;
+                flex: 0 0 300px;
+            }
+
+            .ws-log-section {
+                flex: 1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .login-box {
+                width: calc(100% - 1.5rem);
+                padding: 24px 18px;
+            }
+
+            .admin-container {
+                flex-direction: column;
+                height: auto;
+                min-height: 100vh;
+            }
+
+            .admin-sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #ddd;
+            }
+
+            .admin-header {
+                padding: 14px;
+            }
+
+            .admin-header h1 {
+                font-size: 18px;
+            }
+
+            .users-list,
+            .pagination,
+            .ws-log-content {
+                padding: 12px;
+            }
+
+            .user-item {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+                padding: 10px 12px;
+            }
+
+            .secret-dropdown {
+                flex: 1 1 auto;
+                max-width: 100%;
+            }
+
+            .pagination {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Form -->
+    <div id="loginContainer" class="login-container">
+        <div class="login-box">
+            <h1>🔐 Admin Panel</h1>
+            <div class="error" id="loginError"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="adminPassword">Password Admin</label>
+                    <input type="password" id="adminPassword" placeholder="Masukkan password" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div id="adminContainer" class="admin-container" style="display: none;">
+        <div class="admin-sidebar">
+            <h2>📊 Admin</h2>
+            <div class="user-info">
+                <div style="margin-bottom: 10px;">Logged in as Admin</div>
+                <div style="color: #27ae60;">✓ Connected</div>
+            </div>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="admin-content">
+            <div class="admin-header">
+                <h1>User Management & WebSocket Logs</h1>
+            </div>
+
+            <div class="admin-main">
+                <div class="users-section">
+                    <div class="users-list" id="usersList">
+                        <div class="loading">Loading users...</div>
+                    </div>
+                    <div class="pagination" id="pagination">
+                        <!-- Pagination will be inserted here -->
+                    </div>
+                </div>
+
+                <div class="ws-log-section">
+                    <div class="ws-log-header">
+                        <span>📡 WebSocket Log (JSON)</span>
+                        <button class="clear-log-btn" onclick="clearLogs()">Clear Logs</button>
+                    </div>
+                    <div class="ws-log-content" id="wsLogContent">
+                        <div class="log-entry" style="color: #888;">Waiting for logs...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ITEMS_PER_PAGE = 10;
+        let currentPage = 1;
+        let totalUsers = 0;
+        let totalPages = 1;
+        let logs = [];
+
+        // Login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('adminPassword').value;
+            const errorDiv = document.getElementById('loginError');
+            errorDiv.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+
+                if (!res.ok) {
+                    throw new Error('Password salah');
+                }
+
+                const data = await res.json();
+                localStorage.setItem('adminToken', data.token);
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('adminContainer').style.display = 'flex';
+                loadUsers(1);
+                startLogPolling();
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            }
+        });
+
+        // Load Users
+        async function loadUsers(page = 1) {
+            currentPage = page;
+            const token = localStorage.getItem('adminToken');
+
+            try {
+                const res = await fetch(`/api/admin/users?page=${page}&limit=${ITEMS_PER_PAGE}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) throw new Error('Gagal load users');
+
+                const data = await res.json();
+                totalUsers = data.total;
+                totalPages = data.totalPages;
+
+                const usersList = document.getElementById('usersList');
+                usersList.innerHTML = data.users.map(user => `
+                    <div class="user-item">
+                        <div class="user-main">
+                            <div class="user-id-badge">#${user.user_id}</div>
+                            <div class="user-meta">
+                                <div class="user-name">${user.username}</div>
+                                <div class="user-email">${user.email}</div>
+                            </div>
+                        </div>
+                        <details class="secret-dropdown">
+                            <summary>Secret Keys (${user.secret_keys ? user.secret_keys.length : 0})</summary>
+                            <div class="secret-dropdown-content">
+                                ${user.secret_keys && user.secret_keys.length > 0
+                                    ? user.secret_keys.map(key => `<div>🔑 ${key}</div>`).join('')
+                                    : '<div style="color:#6b7280;">No devices</div>'}
+                            </div>
+                        </details>
+                    </div>
+                `).join('');
+
+                updatePagination();
+            } catch (error) {
+                document.getElementById('usersList').innerHTML = `<div class="loading" style="color: #e74c3c;">${error.message}</div>`;
+            }
+        }
+
+        // Update Pagination
+        function updatePagination() {
+            const pagination = document.getElementById('pagination');
+            let html = '';
+
+            if (currentPage > 1) {
+                html += `<button onclick="loadUsers(1)">«</button>`;
+                html += `<button onclick="loadUsers(${currentPage - 1})">‹</button>`;
+            }
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === currentPage) {
+                    html += `<button class="active">${i}</button>`;
+                } else if (i <= currentPage + 2 && i >= currentPage - 2) {
+                    html += `<button onclick="loadUsers(${i})">${i}</button>`;
+                }
+            }
+
+            if (currentPage < totalPages) {
+                html += `<button onclick="loadUsers(${currentPage + 1})">›</button>`;
+                html += `<button onclick="loadUsers(${totalPages})">»</button>`;
+            }
+
+            html += `<div class="page-info">${currentPage} / ${totalPages}</div>`;
+            pagination.innerHTML = html;
+        }
+
+        // Start Log Polling
+        async function startLogPolling() {
+            setInterval(fetchLogs, 1000);
+        }
+
+        function renderLogs() {
+            const logContent = document.getElementById('wsLogContent');
+            logContent.innerHTML = '';
+
+            if (logs.length === 0) {
+                logContent.innerHTML = '<div class="log-entry" style="color: #888;">Waiting for logs...</div>';
+                return;
+            }
+
+            logs.forEach(item => {
+                    const entry = document.createElement('div');
+                    entry.className = `log-entry ${item.type}`;
+
+                    // Build header/meta for the log entry
+                    const meta = document.createElement('div');
+                    meta.className = 'log-meta';
+
+                    const ts = document.createElement('div');
+                    ts.className = 'log-timestamp';
+                    ts.textContent = item.timestamp || '';
+                    meta.appendChild(ts);
+
+                    // Show device timing badges if present
+                    const d2s = item.data && (item.data.device_to_server_ms || item.data.device_to_server_ms === 0) ? item.data.device_to_server_ms : null;
+                    const d2d = item.data && (item.data.device_to_dashboard_ms || item.data.device_to_dashboard_ms === 0) ? item.data.device_to_dashboard_ms : null;
+                    if (d2s !== null) {
+                        const badge2 = document.createElement('div');
+                        badge2.className = 'log-badge';
+                        badge2.style.color = '#ffd085';
+                        badge2.textContent = `device_to_server_ms: ${d2s}`;
+                        meta.appendChild(badge2);
+                    }
+                    if (d2d !== null) {
+                        const badge3 = document.createElement('div');
+                        badge3.className = 'log-badge';
+                        badge3.style.color = '#9ad0ff';
+                        badge3.textContent = `device_to_dashboard_ms: ${d2d}`;
+                        meta.appendChild(badge3);
+                    }
+
+                    // JSON payload (pretty)
+                    const pre = document.createElement('pre');
+                    pre.style.margin = '0';
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.textContent = JSON.stringify(item.data, null, 2);
+
+                    entry.appendChild(meta);
+                    entry.appendChild(pre);
+                    logContent.appendChild(entry);
+            });
+
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        // Fetch Logs
+        async function fetchLogs() {
+            const token = localStorage.getItem('adminToken');
+
+            try {
+                const res = await fetch('/api/admin/ws-logs', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) return;
+
+                const data = await res.json();
+                if (data.logs.length > logs.length) {
+                    logs = data.logs;
+                    renderLogs();
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+            }
+        }
+
+        // Clear Logs
+        async function clearLogs() {
+            if (!confirm('Clear all logs?')) return;
+
+            const token = localStorage.getItem('adminToken');
+
+            try {
+                const res = await fetch('/api/admin/ws-logs', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (res.ok) {
+                    logs = [];
+                    renderLogs();
+                }
+            } catch (error) {
+                console.error('Error clearing logs:', error);
+            }
+        }
+
+        // Logout
+        function logout() {
+            localStorage.removeItem('adminToken');
+            document.getElementById('loginContainer').style.display = 'flex';
+            document.getElementById('adminContainer').style.display = 'none';
+            document.getElementById('loginForm').reset();
+        }
+
+        // Check if already logged in
+        if (localStorage.getItem('adminToken')) {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('adminContainer').style.display = 'flex';
+            loadUsers(1);
+            startLogPolling();
+            renderLogs();
+        }
+    </script>
+</body>
+</html>

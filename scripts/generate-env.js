@@ -106,11 +106,35 @@ function main() {
     lines.push('PORT=3001');
   }
 
+  // MySQL Configuration (default untuk development)
+  if (!lines.some((line) => line.startsWith('DB_TYPE='))) {
+    lines.push('DB_TYPE=mysql');
+  }
+  if (!lines.some((line) => line.startsWith('DB_HOST='))) {
+    lines.push('DB_HOST=localhost');
+  }
+  if (!lines.some((line) => line.startsWith('DB_USER='))) {
+    lines.push('DB_USER=uniot_user');
+  }
+  if (!lines.some((line) => line.startsWith('DB_PASSWORD='))) {
+    lines.push('DB_PASSWORD=uniot_pass');
+  }
+  if (!lines.some((line) => line.startsWith('DB_NAME='))) {
+    lines.push('DB_NAME=uniot_db');
+  }
+  if (!lines.some((line) => line.startsWith('DB_ROOT_PASSWORD='))) {
+    lines.push('DB_ROOT_PASSWORD=root123');
+  }
+
   fs.writeFileSync(envPath, `${lines.join('\n')}\n`, 'utf8');
 
   const portLine = lines.find((line) => line.startsWith('PORT=')) || 'PORT=3001';
   const port = portLine.split('=')[1] || '3001';
-  console.log(`.env diperbarui. LOCAL_IP=${localIp}, PORT=${port}`);
+  const dbType = lines.find((line) => line.startsWith('DB_TYPE='))?.split('=')[1] || 'mysql';
+  console.log(`.env diperbarui:`);
+  console.log(`  LOCAL_IP=${localIp}`);
+  console.log(`  PORT=${port}`);
+  console.log(`  DB_TYPE=${dbType}`);
 }
 
 main();

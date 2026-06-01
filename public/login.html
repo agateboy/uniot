@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Dashboard UNIOT</title>
+    <link rel="stylesheet" href="styles/global.css">
     <style>
         /* Mengambil style dasar dari login.html untuk konsistensi */
         body {
@@ -23,6 +24,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem 1.5rem;
             border-bottom: 1px solid #dddfe2;
         }
 
@@ -43,6 +46,7 @@
             list-style: none;
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 25px;
         }
 
@@ -161,6 +165,7 @@
             max-width: 400px;
             box-sizing: border-box;
             margin: 3rem auto; /* DITAMBAHKAN: untuk memberi jarak dari header dan center */
+            margin-bottom: 2rem;
         }
 
         .login-container h1 {
@@ -246,6 +251,77 @@
             margin-bottom: 1rem;
             display: none;
             text-align: center;
+        }
+
+        @media (max-width: 900px) {
+            .app-header {
+                padding: 0.9rem 1.2rem;
+            }
+
+            .logo {
+                font-size: 1.2rem;
+            }
+
+            .main-nav ul {
+                gap: 10px;
+            }
+
+            .main-nav a,
+            .doc-menu summary {
+                font-size: 0.92rem;
+                padding: 0.45rem 0.75rem;
+            }
+
+            .doc-links {
+                min-width: 210px;
+            }
+
+            .login-container {
+                width: calc(100% - 1.5rem);
+                margin: 1.5rem auto;
+                padding: 1.5rem;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .app-header {
+                align-items: flex-start;
+            }
+
+            .main-nav {
+                width: 100%;
+            }
+
+            .main-nav ul {
+                width: 100%;
+                gap: 8px;
+            }
+
+            .main-nav li {
+                flex: 1 1 calc(50% - 8px);
+            }
+
+            .main-nav li a,
+            .doc-menu summary {
+                display: block;
+                width: 100%;
+                text-align: center;
+            }
+
+            .doc-links {
+                right: auto;
+                left: 0;
+                width: 100%;
+                min-width: 0;
+            }
+
+            .login-container h1 {
+                font-size: 1.45rem;
+            }
+
+            .btn {
+                font-size: 1rem;
+            }
         }
     </style>
 </head>

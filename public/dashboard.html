@@ -3,10 +3,13 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard UNIOT</title>
+    <link rel="stylesheet" href="styles/global.css">
     <style>
         body {
             font-family: sans-serif;
+            margin: 0;
             padding: 20px;
             background: #f4f7f6;
         }
@@ -49,9 +52,6 @@
 
         #logoutButton {
             background: #dc3545;
-            position: absolute;
-            top: 20px;
-            right: 20px;
         }
 
         #logoutButton:hover {
@@ -69,7 +69,8 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            flex-basis: 400px;
+            flex: 1 1 380px;
+            min-width: 280px;
             box-sizing: border-box;
         }
 
@@ -116,6 +117,26 @@
             width: 300px;
         }
 
+        .dashboard-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        #dashboard-controls .controls-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        #dashboard-controls .controls-row label {
+            margin-right: 0;
+        }
+
         #showWidgetFormButton {
             background: #28a745;
             margin-left: 15px;
@@ -143,11 +164,12 @@
         }
 
         #dashboard-container {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
             gap: 15px;
             width: 100%;
             margin-top: 20px;
+            align-items: start;
         }
 
         /* --- Style Widget --- */
@@ -168,38 +190,29 @@
         }
 
         .widget.graph {
-            width: calc(50% - 10px);
-            height: 350px;
-            min-width: 400px;
+            min-height: 350px;
         }
 
         /* Lebar widget graph */
         .widget.gauge {
-            width: calc(33.33% - 10px);
-            height: 300px;
-            min-width: 250px;
+            min-height: 300px;
         }
 
         /* Lebar widget gauge */
         .widget.toggle {
-            width: calc(33.33% - 10px);
-            height: 150px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-width: 250px;
+            overflow: hidden;
         }
 
         .widget.slider {
-            /* Gunakan ukuran yang sama dengan Toggle */
-            width: calc(33.33% - 10px);
-            height: 150px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-width: 250px;
-
-            /* Pastikan background putih & ada border */
+            overflow: hidden;
             background: white;
             border: 1px solid #ccc;
             border-radius: 8px;
@@ -207,26 +220,21 @@
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             box-sizing: border-box;
             position: relative;
-            /* Agar tidak melayang */
         }
 
         .widget.number {
-            width: calc(33.33% - 10px);
-            height: 150px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
             justify-content: center;
-            min-width: 250px;
         }
 
         .widget.toggle,
         .widget.slider {
-            width: 300px;
-            height: 150px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            /* Tambahkan ini agar isi tidak keluar */
             overflow: hidden;
         }
 
@@ -328,13 +336,96 @@
                 flex-basis: auto;
             }
         }
+
+        /* Grid-friendly widget sizing */
+        .widget {
+            width: 100%;
+        }
+
+        .widget.gauge,
+        .widget.toggle,
+        .widget.slider,
+        .widget.number {
+            min-height: 150px;
+        }
+
+        @media (min-width: 1200px) {
+            .widget.graph {
+                grid-column: span 2;
+            }
+        }
+
+        input[type="text"],
+        select {
+            width: min(100%, 340px);
+            max-width: 100%;
+        }
+
+        @media (max-width: 1024px) {
+            #dashboard-controls .controls-row {
+                align-items: stretch;
+            }
+
+            #dashboard-controls .controls-row label {
+                width: 100%;
+                margin-bottom: -2px;
+            }
+
+            #dashboard-controls .controls-row select,
+            #dashboard-controls .controls-row button {
+                width: 100%;
+                margin-left: 0 !important;
+            }
+
+            .widget.graph {
+                flex-basis: 100%;
+                min-height: 320px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+
+            .dashboard-topbar h1 {
+                font-size: 1.5rem;
+                margin: 0;
+            }
+
+            #logoutButton {
+                width: 100%;
+            }
+
+            .manager-container,
+            #dashboard-controls,
+            #widgetFormContainer {
+                padding: 14px;
+            }
+
+            #deviceList li {
+                align-items: flex-start;
+                gap: 8px;
+                flex-direction: column;
+            }
+
+            .btn-delete {
+                margin-left: 0;
+            }
+
+            .widget {
+                min-width: 0;
+            }
+        }
     </style>
     <script src="./chart.js"></script>
 </head>
 
 <body>
-    <h1>Dashboard Saya</h1>
-    <button id="logoutButton">Logout</button>
+    <div class="dashboard-topbar">
+        <h1>Dashboard Saya</h1>
+        <button id="logoutButton">Logout</button>
+    </div>
 
     <div class="container-wrapper">
         <div class="manager-container">
@@ -373,12 +464,14 @@
     <hr>
 
     <div id="dashboard-controls">
-        <label for="activeDeviceSelect">Pilih Perangkat Aktif:</label>
-        <select id="activeDeviceSelect">
-            <option value="">-- Pilih Perangkat --</option>
-        </select>
-        <button id="showWidgetFormButton" style="display: none;">+ Tambah Variabel</button>
-        <button id="shareDeviceButton" style="background-color: #6f42c1; margin-left: 10px;">Share Link</button>
+        <div class="controls-row">
+            <label for="activeDeviceSelect">Pilih Perangkat Aktif:</label>
+            <select id="activeDeviceSelect">
+                <option value="">-- Pilih Perangkat --</option>
+            </select>
+            <button id="showWidgetFormButton" style="display: none;">+ Tambah Variabel</button>
+            <button id="shareDeviceButton" style="background-color: #6f42c1; margin-left: 10px;">Share Link</button>
+        </div>
 
         <div id="widgetFormContainer" style="display: none;">
             <h3 id="widgetFormTitle">Tambah Variabel Baru untuk...</h3>
@@ -490,6 +583,21 @@
                                 updateWidgetData(dataWithDeviceId);
                                 console.log(`[✓] Widget updated untuk device ${selectedDeviceId}`);
                             }
+                        }
+
+                        // Laporkan latency ke server jika device mengirim original timestamp
+                        if (data.original_timestamp_ms) {
+                            try {
+                                const clientReceiveMs = Date.now();
+                                const latencyReport = {
+                                    action: 'latency_report',
+                                    device: data.device,
+                                    var: data.var,
+                                    original_timestamp_ms: data.original_timestamp_ms,
+                                    client_receive_ms: clientReceiveMs
+                                };
+                                if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(latencyReport));
+                            } catch (e) { console.warn('Failed to send latency report', e); }
                         }
                     }
                 } catch (error) {
@@ -683,7 +791,7 @@
 
             // --- LOGIKA KONTEN WIDGET BERDASARKAN TIPE ---
 
-            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+            if (widget.widget_type === 'graph' || widget.widget_type === 'chart' || widget.widget_type === 'gauge') {
                 // --- GRAPH & GAUGE ---
                 const canvas = document.createElement('canvas');
                 canvasId = `canvas-${widget.widget_id}`;
@@ -758,11 +866,11 @@
                 d.sensor_type === widget.sensor_type
             ) : [];
 
-            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+            if (widget.widget_type === 'graph' || widget.widget_type === 'chart' || widget.widget_type === 'gauge') {
                 // Gunakan setTimeout agar elemen canvas dirender dulu oleh browser
                 setTimeout(() => {
                     try {
-                        if (widget.widget_type === 'graph') {
+                        if (widget.widget_type === 'graph' || widget.widget_type === 'chart') {
                             drawGraph(canvasId, widgetData);
                         } else if (widget.widget_type === 'gauge') {
                             drawGauge(canvasId, widgetData, widget.data_type);
@@ -842,7 +950,7 @@
             if (!widgetToUpdate) return;
 
             // Update untuk tipe 'graph'
-            if (widgetToUpdate.widget_type === 'graph') {
+            if (widgetToUpdate.widget_type === 'graph' || widgetToUpdate.widget_type === 'chart') {
                 const canvasId = `canvas-${widgetToUpdate.widget_id}`;
                 const chart = Chart.getChart(canvasId);
                 if (!chart) return; // Chart belum ada atau sudah dihancurkan

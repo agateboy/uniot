@@ -1,5 +1,4 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -9,6 +8,8 @@ const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
 const { generateSecretKey } = require('./lib/secretKeyGenerator');
+
+const DB_TYPE = process.env.DB_TYPE || 'mysql';  // 'mysql' atau 'sqlite'
 
 // Muat variabel .env sederhana tanpa dependensi tambahan.
 const envPath = path.join(__dirname, '.env');
@@ -124,7 +125,11 @@ class SensorDataBuffer {
         console.log(`[SensorBuffer] Flushing ${batch.length} sensor data to database...`);
 
         // Batch insert sebagai single transaction
-        db.run('BEGIN TRANSACTION', (beginErr) => {
+        // MySQL: START TRANSACTION, SQLite: BEGIN
+        const startCmd = getDatabaseType() === 'mysql' ? 'START TRANSACTION' : 'BEGIN';
+        const endCmd = 'COMMIT';
+        
+        db.run(startCmd, (beginErr) => {
             if (beginErr) {
                 console.error('[SensorBuffer] Transaction error:', beginErr);
                 return;
@@ -132,14 +137,20 @@ class SensorDataBuffer {
 
             let completed = 0;
             batch.forEach(({ deviceId, sensorType, value, timestamp }) => {
+                // Convert ISO timestamp to MySQL datetime format (YYYY-MM-DD HH:mm:ss)
+                let formattedTimestamp = timestamp.toISOString();
+                if (getDatabaseType() === 'mysql') {
+                    formattedTimestamp = timestamp.toISOString().slice(0, 19).replace('T', ' ');
+                }
+                
                 db.run(
                     'INSERT INTO sensor_data (device_id, sensor_type, value, timestamp) VALUES (?, ?, ?, ?)',
-                    [deviceId, sensorType, value, timestamp.toISOString()],
+                    [deviceId, sensorType, value, formattedTimestamp],
                     (err) => {
                         completed++;
                         if (err) console.error('[SensorBuffer] Insert error:', err);
                         if (completed === batch.length) {
-                            db.run('COMMIT', (commitErr) => {
+                            db.run(endCmd, (commitErr) => {
                                 if (commitErr) {
                                     console.error('[SensorBuffer] Commit error:', commitErr);
                                 } else {
@@ -173,116 +184,67 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// --- KONEKSI DATABASE SQLITE ---
-const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite'), (err) => {
+// Admin Panel Route
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// --- DATABASE CONNECTION ---
+const { initializeDatabase, getDatabase, getDatabaseType, getLastNDaysSQL } = require('./lib/database-adapter');
+
+// Initialize database (MySQL dengan fallback ke SQLite)
+initializeDatabase((err, dbInstance) => {
     if (err) {
-        console.error('Error connecting to SQLite database:', err);
-        return;
+        console.error('❌ Failed to initialize database:', err);
+        process.exit(1);
     }
-    console.log('Successfully connected to database.sqlite! 🔌');
+    
+    db = dbInstance;
+    const dbType = getDatabaseType();
 
     // Inisialisasi tabel jika belum ada
     db.run(`CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL
+        user_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS devices (
-        device_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id INTEGER PRIMARY KEY AUTO_INCREMENT,
         user_id INTEGER NOT NULL,
-        device_name TEXT NOT NULL,
-        api_key TEXT UNIQUE NOT NULL,
-        secret_key TEXT UNIQUE NOT NULL,
-        public_slug TEXT UNIQUE,
+        device_name VARCHAR(100) NOT NULL,
+        api_key VARCHAR(255) UNIQUE NOT NULL,
+        secret_key VARCHAR(255) UNIQUE NOT NULL,
+        public_slug VARCHAR(100) UNIQUE,
         FOREIGN KEY(user_id) REFERENCES users(user_id)
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS widgets (
-        widget_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        widget_id INTEGER PRIMARY KEY AUTO_INCREMENT,
         user_id INTEGER NOT NULL,
         device_id INTEGER NOT NULL,
-        sensor_type TEXT NOT NULL,
-        widget_type TEXT NOT NULL,
-        data_type TEXT NOT NULL,
-        current_value TEXT,
+        sensor_type VARCHAR(100) NOT NULL,
+        widget_type VARCHAR(50) NOT NULL,
+        data_type VARCHAR(50) NOT NULL,
+        current_value VARCHAR(255),
         FOREIGN KEY(user_id) REFERENCES users(user_id),
         FOREIGN KEY(device_id) REFERENCES devices(device_id)
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS sensor_data (
-        data_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data_id BIGINT PRIMARY KEY AUTO_INCREMENT,
         device_id INTEGER NOT NULL,
-        sensor_type TEXT NOT NULL,
-        value TEXT NOT NULL,
+        sensor_type VARCHAR(100) NOT NULL,
+        value VARCHAR(255) NOT NULL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(device_id) REFERENCES devices(device_id)
     )`);
 
-    // === MIGRATION: Add secret_key column if it doesn't exist ===
-    db.all("PRAGMA table_info(devices)", (err, columns) => {
-        if (err) {
-            console.error('Error checking table schema:', err);
-            loadSecretKeyRegistry(); // Try to load anyway
-            return;
-        }
-
-        const hasSecretKey = columns && columns.some(col => col.name === 'secret_key');
-        
-        if (!hasSecretKey) {
-            console.log('🔧 Migrating database: Adding secret_key column...');
-            
-            db.run('ALTER TABLE devices ADD COLUMN secret_key TEXT UNIQUE', (alterErr) => {
-                if (alterErr) {
-                    console.error('Error adding secret_key column:', alterErr);
-                    loadSecretKeyRegistry();
-                    return;
-                }
-
-                generateSecretKeysForExisting();
-            });
-        } else {
-            // Column already exists, check if devices need secret_keys
-            generateSecretKeysForExisting();
-        }
-    });
-
-    function generateSecretKeysForExisting() {
-        db.all('SELECT device_id FROM devices WHERE secret_key IS NULL OR secret_key = ""', (selectErr, devicesWithoutKey) => {
-            if (selectErr) {
-                console.error('Error fetching devices without secret_key:', selectErr);
-                loadSecretKeyRegistry();
-                return;
-            }
-
-            if (!devicesWithoutKey || devicesWithoutKey.length === 0) {
-                console.log('✓ All devices have secret_keys');
-                loadSecretKeyRegistry();
-                return;
-            }
-
-            console.log(`Generating secret_keys for ${devicesWithoutKey.length} devices...`);
-            let completed = 0;
-            
-            devicesWithoutKey.forEach(device => {
-                const newKey = generateSecretKey();
-                db.run('UPDATE devices SET secret_key = ? WHERE device_id = ?', 
-                    [newKey, device.device_id],
-                    (updateErr) => {
-                        completed++;
-                        if (updateErr) {
-                            console.error(`Error updating device ${device.device_id}:`, updateErr);
-                        }
-                        if (completed === devicesWithoutKey.length) {
-                            console.log(`✓ Generated secret_keys for ${completed} devices`);
-                            loadSecretKeyRegistry();
-                        }
-                    }
-                );
-            });
-        });
-    }
+    // Load device registry setelah tabel siap
+    setTimeout(() => {
+        loadSecretKeyRegistry();
+    }, 1000);
 });
 
 // === HELPER: Load secret key registry ===
@@ -326,6 +288,54 @@ const autentikasiToken = (req, res, next) => {
         next();
     });
 };
+
+// --- ADMIN AUTHENTICATION ---
+const ADMIN_PASSWORD = '12345678';
+const ADMIN_JWT_SECRET = 'ADMIN_SECRET_KEY_UNTUK_UNIOT_2025';
+
+const autentikasiAdmin = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token == null) return res.sendStatus(401);
+
+    jwt.verify(token, ADMIN_JWT_SECRET, (err, admin) => {
+        if (err) return res.sendStatus(403);
+        req.admin = admin;
+        next();
+    });
+};
+
+// --- WEBSOCKET LOGS STORAGE ---
+const wsLogs = []; // Menyimpan JSON logs dari WebSocket communication
+const MAX_LOGS = 500; // Maksimal logs yang disimpan
+
+function addWsLog(type, data) {
+    // Ensure we never store legacy timing keys in logs
+    const cleaned = JSON.parse(JSON.stringify(data || {}));
+    if (cleaned) {
+        if (Object.prototype.hasOwnProperty.call(cleaned, 'response_time_ms')) delete cleaned.response_time_ms;
+        if (Object.prototype.hasOwnProperty.call(cleaned, 'processing_ms')) delete cleaned.processing_ms;
+    }
+    wsLogs.push({
+        type: type, // 'sent', 'received', 'error'
+        data: cleaned,
+        timestamp: new Date().toISOString()
+    });
+    if (wsLogs.length > MAX_LOGS) {
+        wsLogs.shift(); // Remove oldest log
+    }
+}
+
+function addWsLogWithTiming(type, data, timing) {
+    const payload = { ...data };
+    // Only include device-to-server timing if present.
+    if (timing && typeof timing === 'object') {
+        if (typeof timing.deviceToServerMs === 'number' && Number.isFinite(timing.deviceToServerMs)) {
+            payload.device_to_server_ms = timing.deviceToServerMs;
+        }
+    }
+    addWsLog(type, payload);
+}
 
 // (Ini untuk Socket.IO) Daftar user yang sedang online
 const userSockets = {}; // { userId: socketId }
@@ -487,7 +497,7 @@ app.get('/api/data', autentikasiToken, (req, res) => {
         SELECT sd.sensor_type, sd.value, sd.timestamp, d.device_id, d.device_name
         FROM sensor_data AS sd
         JOIN devices AS d ON sd.device_id = d.device_id
-        WHERE d.user_id = ? AND sd.timestamp >= datetime('now', '-1 day')
+        WHERE d.user_id = ? AND sd.timestamp >= ${getLastNDaysSQL(1)}
         ORDER BY sd.timestamp ASC;
     `;
     db.all(query, [userId], (err, results) => {
@@ -533,16 +543,23 @@ app.post('/api/widgets', autentikasiToken, (req, res) => {
         return res.status(400).json({ message: 'Semua field wajib diisi' });
     }
 
-    // --- PERUBAHAN DI SINI ---
+    // Normalize widget_type to match DB enum (accept frontend synonyms)
+    const allowedWidgetTypes = ['number', 'toggle', 'slider', 'gauge', 'chart'];
+    let normalizedWidgetType = widget_type;
+    if (widget_type === 'graph') normalizedWidgetType = 'chart';
+
+    if (!allowedWidgetTypes.includes(normalizedWidgetType)) {
+        return res.status(400).json({ message: 'Tipe widget tidak dikenali' });
+    }
+
     // Tentukan nilai awal: Toggle='false', Slider='0', Lainnya=''
     let defaultValue = '';
-    if (widget_type === 'toggle') defaultValue = 'false';
-    if (widget_type === 'slider') defaultValue = '0'; 
-    // --------------------------
+    if (normalizedWidgetType === 'toggle') defaultValue = 'false';
+    if (normalizedWidgetType === 'slider') defaultValue = '0';
 
     const query = 'INSERT INTO widgets (user_id, device_id, sensor_type, widget_type, data_type, current_value) VALUES (?, ?, ?, ?, ?, ?)';
     
-    db.run(query, [userId, device_id, sensor_type, widget_type, data_type, defaultValue], function(err) {
+    db.run(query, [userId, device_id, sensor_type, normalizedWidgetType, data_type, defaultValue], function(err) {
         if (err) {
             console.error('Error creating widget:', err);
             return res.status(500).json({ message: 'Gagal membuat widget' });
@@ -622,11 +639,24 @@ wss.on('connection', (ws, req) => {
     // Normalisasi payload agar kompatibel dengan format lama dan baru.
     const normalizeSensorPayload = (data) => {
         const sensor_type = data.var ?? data.sensor_type;
-        const value = data.val !== undefined ? data.val : data.value;
+        let value = data.val !== undefined ? data.val : data.value;
+
+        // Terima nilai numerik yang dikirim sebagai string, termasuk format koma ("27,5") dari MIT App Inventor
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            // Normalisasi koma ke titik
+            const dotNormalized = trimmed.replace(',', '.');
+            // Jika hanya angka (opsional minus dan desimal), parse ke Number sehingga float terjaga
+            if (/^-?\d+(?:\.\d+)?$/.test(dotNormalized)) {
+                const num = Number(dotNormalized);
+                if (!Number.isNaN(num)) value = num;
+            }
+        }
+
         return { sensor_type, value };
     };
 
-    const persistControlState = (targetDeviceId, sensor_type, value) => {
+    const persistControlState = (targetDeviceId, sensor_type, value, originalTimestampMs = null) => {
         // PRIORITAS 1: Update widget immediately (untuk UI responsiveness)
         db.run(
             'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
@@ -647,24 +677,38 @@ wss.on('connection', (ws, req) => {
         setImmediate(async () => {
             db.get('SELECT public_slug FROM devices WHERE device_id = ?', [targetDeviceId], (slugErr, deviceRow) => {
                 if (!slugErr && deviceRow && deviceRow.public_slug) {
-                    broadcastToPublicView(deviceRow.public_slug, {
+                    const serverBroadcastMs = Date.now();
+                    const pubPayload = {
                         type: 'dataUpdate',
                         sensor_type: sensor_type,
                         current_value: value,
+                        server_broadcast_ms: serverBroadcastMs,
                         timestamp: new Date().toISOString()
-                    });
+                    };
+                    if (originalTimestampMs && Number.isFinite(originalTimestampMs)) {
+                        pubPayload.original_timestamp_ms = originalTimestampMs;
+                        pubPayload.original_timestamp = new Date(originalTimestampMs).toISOString();
+                    }
+                    broadcastToPublicView(deviceRow.public_slug, pubPayload);
                 }
             });
 
             db.get('SELECT user_id, device_name FROM devices WHERE device_id = ?', [targetDeviceId], (ownerErr, ownerRow) => {
                 if (!ownerErr && ownerRow) {
-                    broadcastToUserDashboards(ownerRow.user_id, {
+                    const serverBroadcastMsUser = Date.now();
+                    const userPayload = {
                         device: ownerRow.device_name,
                         device_id: Number(targetDeviceId),
                         var: sensor_type,
                         val: value,
+                        server_broadcast_ms: serverBroadcastMsUser,
                         timestamp: new Date().toISOString()
-                    });
+                    };
+                    if (originalTimestampMs && Number.isFinite(originalTimestampMs)) {
+                        userPayload.original_timestamp_ms = originalTimestampMs;
+                        userPayload.original_timestamp = new Date(originalTimestampMs).toISOString();
+                    }
+                    broadcastToUserDashboards(ownerRow.user_id, userPayload);
                 }
             });
         });
@@ -716,8 +760,27 @@ wss.on('connection', (ws, req) => {
     // MESSAGE HANDLER
     ws.on('message', (rawMessage) => {
         try {
+            const messageStartedAt = process.hrtime.bigint();
+            const serverRecvMs = Date.now();
             const messageText = rawMessage.toString();
             const data = JSON.parse(messageText);
+
+            // Try to parse device-provided timestamp (if device includes it)
+            let deviceSentAtMs = null;
+            try {
+                if (data && (data.timestamp || data.ts || data.time || data.sent_at)) {
+                    const tsRaw = data.timestamp || data.ts || data.time || data.sent_at;
+                    if (typeof tsRaw === 'number') {
+                        // If seconds (10-digit), convert to ms
+                        deviceSentAtMs = tsRaw > 1e12 ? tsRaw : (tsRaw < 1e12 ? tsRaw * 1000 : tsRaw);
+                    } else if (typeof tsRaw === 'string') {
+                        const parsed = Date.parse(tsRaw);
+                        if (!isNaN(parsed)) deviceSentAtMs = parsed;
+                    }
+                }
+            } catch (e) {
+                deviceSentAtMs = null;
+            }
 
             // Tentukan priority: Command (dari dashboard atau device) = priority 1, Data sensor = priority 0
             let messagePriority = 0;
@@ -739,6 +802,27 @@ wss.on('connection', (ws, req) => {
 
             console.log(`[WebSocket Message] Dari ${clientType || 'unknown'} (Type: ${messageType}, Priority: ${messagePriority})`);
 
+            // Log untuk admin panel (WebSocket communication log)
+            addWsLog('received', {
+                from: clientType,
+                type: messageType,
+                data: data,
+                timestamp: new Date().toISOString()
+            });
+
+            const logProcessed = (type, payload) => {
+                const durationMs = Number(process.hrtime.bigint() - messageStartedAt) / 1e6;
+                const roundedMs = Math.round(durationMs * 100) / 100; // two decimal ms (kept internal)
+                let deviceToServerMs = null;
+                if (deviceSentAtMs && Number.isFinite(deviceSentAtMs)) {
+                    deviceToServerMs = Math.round((serverRecvMs - deviceSentAtMs) * 100) / 100;
+                }
+                // Only send device->server timing to logs
+                const timingObj = {};
+                if (deviceToServerMs !== null) timingObj.deviceToServerMs = deviceToServerMs;
+                addWsLogWithTiming(type, payload, timingObj);
+            };
+
             // ENQUEUE ke message queue untuk async processing
             messageQueue.enqueue(async () => {
                 // === HANDSHAKE AUTH UNTUK DEVICES YANG MENUNGGU ===
@@ -753,6 +837,12 @@ wss.on('connection', (ws, req) => {
                                 status: 'error', 
                                 message: 'Secret key tidak valid' 
                             }));
+                            logProcessed('error', {
+                                from: clientType,
+                                type: 'auth-failed',
+                                data: data,
+                                message: 'Secret key tidak valid'
+                            });
                             ws.close(1008, 'Secret key tidak valid');
                             allConnections.delete(connClientKey);
                             clearTimeout(authTimeout);
@@ -795,6 +885,15 @@ wss.on('connection', (ws, req) => {
                             message: `Terauthentikasi sebagai "${deviceName}"`,
                             device_id: deviceId
                         }));
+
+                        logProcessed('processed', {
+                            from: clientType,
+                            type: 'auth-success',
+                            data: data,
+                            device_id: deviceId,
+                            device_name: deviceName,
+                            message: `Terauthentikasi sebagai "${deviceName}"`
+                        });
                         
                         console.log(`[✓ Device] Terauthentikasi - "${deviceName}" (ID: ${deviceId})`);
                         clearTimeout(authTimeout);
@@ -807,6 +906,12 @@ wss.on('connection', (ws, req) => {
                             status: 'error', 
                             message: 'Kirim {"action":"auth","key":"..."} untuk authenticating' 
                         }));
+                        logProcessed('error', {
+                            from: clientType,
+                            type: 'auth-invalid-format',
+                            data: data,
+                            message: 'Kirim {"action":"auth","key":"..."} untuk authenticating'
+                        });
                         return;
                     }
                 }
@@ -814,14 +919,130 @@ wss.on('connection', (ws, req) => {
                 // === HANYA KLIEN YANG TERAUTHENTIKASI YANG DAPAT MENGIRIM DATA ===
                 if (authStatus !== 'authenticated') {
                     console.log(`[✗] Klien yang tidak terauthentikasi mencoba mengirim data`);
+                    logProcessed('error', {
+                        from: clientType,
+                        type: 'unauthenticated',
+                        data: data,
+                        message: 'Klien yang tidak terauthentikasi mencoba mengirim data'
+                    });
                     return;
                 }
                 
                 // --- DEVICE MENGIRIM DATA SENSOR ---
                 if (clientType === 'device') {
+                    // Backwards-compatible: accept either a single reading
+                    // (e.g. {"var":"suhu","val":27}) or a batch array
+                    // (e.g. [{"var":"suhu","val":27},{"var":"hum","val":55}]).
+                    if (Array.isArray(data)) {
+                        const readings = data;
+                        if (readings.length === 0) {
+                            console.error('[Device] Batch pesan kosong');
+                            logProcessed('error', {
+                                from: clientType,
+                                type: 'invalid-device-data-batch',
+                                data: data,
+                                message: 'Batch pesan kosong'
+                            });
+                            return;
+                        }
+
+                        // ACK once for the whole batch
+                        try {
+                            ws.send(JSON.stringify({ status: 'ack', type: 'batchReceived', count: readings.length, timestamp: new Date().toISOString() }));
+                        } catch (e) {
+                            // ignore send errors
+                        }
+
+                        readings.forEach((reading) => {
+                            // Try per-reading timestamp first, fall back to message-level deviceSentAtMs
+                            let perReadingTs = null;
+                            try {
+                                const tsRaw = reading.timestamp || reading.ts || reading.time || reading.sent_at;
+                                if (tsRaw) {
+                                    if (typeof tsRaw === 'number') {
+                                        perReadingTs = tsRaw > 1e12 ? tsRaw : (tsRaw < 1e12 ? tsRaw * 1000 : tsRaw);
+                                    } else if (typeof tsRaw === 'string') {
+                                        const parsed = Date.parse(tsRaw);
+                                        if (!isNaN(parsed)) perReadingTs = parsed;
+                                    }
+                                }
+                            } catch (e) {
+                                perReadingTs = deviceSentAtMs;
+                            }
+
+                            const { sensor_type, value } = normalizeSensorPayload(reading);
+                            if (!sensor_type || value === undefined) return; // skip invalid entries
+
+                            // Immediate realtime broadcast for dashboards
+                            const serverBroadcastMs = Date.now();
+                            const payload = {
+                                device: deviceName,
+                                device_id: deviceId,
+                                var: sensor_type,
+                                val: value,
+                                server_broadcast_ms: serverBroadcastMs,
+                                timestamp: new Date().toISOString()
+                            };
+                            if (perReadingTs) {
+                                payload.original_timestamp_ms = perReadingTs;
+                                payload.original_timestamp = new Date(perReadingTs).toISOString();
+                            }
+                            broadcastToUserDashboards(userId, payload);
+
+                            // Buffer for DB
+                            sensorDataBuffer.add(deviceId, sensor_type, value);
+
+                            // Async widget update & public/device broadcasts
+                            setImmediate(() => {
+                                db.run(
+                                    'UPDATE widgets SET current_value = ? WHERE device_id = ? AND sensor_type = ?',
+                                    [value, deviceId, sensor_type],
+                                    (err) => {
+                                        if (!err) {
+                                            db.get('SELECT public_slug FROM devices WHERE device_id = ?', [deviceId], (err, deviceRow) => {
+                                                if (!err && deviceRow && deviceRow.public_slug) {
+                                                    broadcastToPublicView(deviceRow.public_slug, {
+                                                        type: 'dataUpdate',
+                                                        sensor_type: sensor_type,
+                                                        current_value: value,
+                                                        timestamp: new Date().toISOString()
+                                                    });
+                                                }
+                                            });
+
+                                            broadcastToAllDevices({
+                                                type: 'dataUpdate',
+                                                device_id: deviceId,
+                                                device_name: deviceName,
+                                                var: sensor_type,
+                                                val: value,
+                                                timestamp: new Date().toISOString()
+                                            }, connClientKey);
+                                        }
+                                    }
+                                );
+                            });
+                        });
+
+                        logProcessed('processed', {
+                            from: clientType,
+                            type: 'sensor-data-batch',
+                            count: readings.length,
+                            data: (readings.length > 10 ? `[${readings.length} readings]` : readings)
+                        });
+                        return;
+                    }
+
+                    // Single reading (legacy / default)
                     const { sensor_type, value } = normalizeSensorPayload(data);
                     if (!sensor_type || value === undefined) {
                         console.error('[Device] Pesan tidak valid - butuh var/val atau sensor_type/value');
+                        logProcessed('error', {
+                            from: clientType,
+                            type: 'invalid-device-data',
+                            data: data,
+                            message: 'Pesan tidak valid - butuh var/val atau sensor_type/value'
+                        });
                         return;
                     }
 
@@ -836,12 +1057,25 @@ wss.on('connection', (ws, req) => {
                         if (String(targetDeviceId) !== String(deviceId)) {
                             console.warn(`[✗ Device] Menolak command lintas device. device auth=${deviceId}, target=${targetDeviceId}`);
                             ws.send(JSON.stringify({ status: 'error', message: 'Tidak diizinkan mengontrol device lain' }));
+                            logProcessed('error', {
+                                from: clientType,
+                                type: 'command-rejected',
+                                data: data,
+                                message: 'Tidak diizinkan mengontrol device lain'
+                            });
                             return;
                         }
 
                         console.log(`[Device/Controller ${deviceName}] 🎮 Perintah lokal: ${sensor_type} = ${value}`);
-                        persistControlState(targetDeviceId, sensor_type, value);
+                        persistControlState(targetDeviceId, sensor_type, value, deviceSentAtMs);
                         routeCommandToDeviceInstances('device-controller', targetDeviceId, sensor_type, value, ws, connClientKey);
+                        logProcessed('processed', {
+                            from: clientType,
+                            type: 'device-command',
+                            data: data,
+                            target_device_id: targetDeviceId,
+                            message: 'Perintah diproses'
+                        });
                         return;
                     }
                     
@@ -856,16 +1090,33 @@ wss.on('connection', (ws, req) => {
                         timestamp: new Date().toISOString(),
                         message: 'Data berhasil diterima'
                     }));
+
+                    logProcessed('processed', {
+                        from: clientType,
+                        type: 'sensor-data',
+                        data: data,
+                        ack: {
+                            status: 'ack',
+                            message: 'Data berhasil diterima'
+                        }
+                    });
                     
                     //  PRIORITAS 1: Broadcast realtime (LANGSUNG, tidak di-buffer)
                     // Jadi dashboard lihat update immediately
-                    broadcastToUserDashboards(userId, {
+                    const serverBroadcastMs = Date.now();
+                    const payload = {
                         device: deviceName,
                         device_id: deviceId,
                         var: sensor_type,
                         val: value,
+                        server_broadcast_ms: serverBroadcastMs,
                         timestamp: new Date().toISOString()
-                    });
+                    };
+                    if (deviceSentAtMs) {
+                        payload.original_timestamp_ms = deviceSentAtMs;
+                        payload.original_timestamp = new Date(deviceSentAtMs).toISOString();
+                    }
+                    broadcastToUserDashboards(userId, payload);
                     
                     //  PRIORITAS 2: Buffer sensor data untuk batch insert (tidak blocking)
                     sensorDataBuffer.add(deviceId, sensor_type, value);
@@ -906,6 +1157,28 @@ wss.on('connection', (ws, req) => {
                     });
                 }
                 
+                // Handle latency reports from dashboard (client-side measured)
+                else if (clientType === 'dashboard' && data.action === 'latency_report') {
+                    try {
+                        const origMs = Number(data.original_timestamp_ms);
+                        const recvMs = Number(data.client_receive_ms) || Date.now();
+                        if (!isNaN(origMs)) {
+                            const deviceToDashboardMs = Math.round((recvMs - origMs) * 100) / 100;
+                            addWsLog('latency', {
+                                from: 'dashboard',
+                                device: data.device,
+                                var: data.var,
+                                device_to_dashboard_ms: deviceToDashboardMs,
+                                original_timestamp_ms: origMs,
+                                client_receive_ms: recvMs
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error processing latency_report:', e);
+                    }
+                    return;
+                }
+
                 // --- DASHBOARD MENGIRIM PERINTAH KE DEVICE (PRIORITAS TINGGI) ---
                 else if (clientType === 'dashboard') {
                     const device_id = data.device_id;
@@ -913,13 +1186,26 @@ wss.on('connection', (ws, req) => {
                     if (!device_id || !sensor_type || value === undefined) {
                         console.error('[Dashboard] Pesan tidak valid - butuh device_id + var/val atau sensor_type/value');
                         ws.send(JSON.stringify({ status: 'error', message: 'Format pesan tidak valid' }));
+                        logProcessed('error', {
+                            from: clientType,
+                            type: 'invalid-dashboard-data',
+                            data: data,
+                            message: 'Format pesan tidak valid'
+                        });
                         return;
                     }
                     
                     console.log(`[Dashboard User ${userId}] 📥 Perintah untuk device ${device_id}: ${sensor_type} = ${value}`);
 
-                    persistControlState(device_id, sensor_type, value);
+                    persistControlState(device_id, sensor_type, value, deviceSentAtMs);
                     routeCommandToDeviceInstances('dashboard', device_id, sensor_type, value, ws);
+                    logProcessed('processed', {
+                        from: clientType,
+                        type: 'dashboard-command',
+                        data: data,
+                        target_device_id: device_id,
+                        message: 'Perintah dikirim ke device'
+                    });
                 }
             }, messagePriority); //  Dengan priority sesuai tipe message
 
@@ -1142,7 +1428,7 @@ app.get('/api/public/data', (req, res) => {
         const queryData = `
             SELECT sensor_type, value, timestamp 
             FROM sensor_data 
-            WHERE device_id = ? AND timestamp >= datetime('now', '-1 day') 
+            WHERE device_id = ? AND timestamp >= ${getLastNDaysSQL(1)} 
             ORDER BY timestamp ASC
         `;
 
@@ -1214,7 +1500,7 @@ app.get('/api/public/view/:slug', (req, res) => {
 
         // Ambil Widgets
         const queryWidgets = "SELECT sensor_type, widget_type, data_type, current_value FROM widgets WHERE device_id = ?";
-        const queryData = "SELECT sensor_type, value, timestamp FROM sensor_data WHERE device_id = ? AND timestamp >= datetime('now', '-1 day') ORDER BY timestamp ASC";
+        const queryData = `SELECT sensor_type, value, timestamp FROM sensor_data WHERE device_id = ? AND timestamp >= ${getLastNDaysSQL(1)} ORDER BY timestamp ASC`;
 
         db.all(queryWidgets, [deviceId], (errW, widgets) => {
             if (errW) return res.status(500).json({ message: 'Error widgets' });
@@ -1289,6 +1575,103 @@ function broadcastToPublicView(slug, data) {
         }
     });
 }
+
+// --- ADMIN ENDPOINTS ---
+
+// 1. Admin Login
+app.post('/api/admin/login', (req, res) => {
+    const { password } = req.body;
+
+    if (password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ status: 'error', message: 'Password salah' });
+    }
+
+    const token = jwt.sign({ admin: true }, ADMIN_JWT_SECRET, { expiresIn: '8h' });
+    res.json({ status: 'success', token });
+});
+
+// 2. Get Users dengan Pagination
+app.get('/api/admin/users', autentikasiAdmin, (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    // Get total count of users
+    db.get('SELECT COUNT(*) as total FROM users', [], (err, countResult) => {
+        if (err) {
+            console.error('Error counting users:', err);
+            return res.status(500).json({ status: 'error', message: 'Error counting users' });
+        }
+
+        // Handle both MySQL and SQLite result formats
+        const total = countResult.total || countResult.count || 0;
+        const totalPages = Math.ceil(total / limit);
+
+        // Get users dengan devices (secret keys) mereka
+        const query = `
+            SELECT
+                u.user_id,
+                u.username,
+                u.email,
+                COALESCE(GROUP_CONCAT(d.secret_key ORDER BY d.device_id SEPARATOR ','), '') AS secret_keys
+            FROM users u
+            LEFT JOIN devices d ON u.user_id = d.user_id
+            GROUP BY u.user_id, u.username, u.email
+            ORDER BY u.user_id ASC
+            LIMIT ? OFFSET ?
+        `;
+        
+        db.all(query, [limit, offset], (err, users) => {
+            if (err) {
+                console.error('Error fetching users:', err);
+                return res.status(500).json({ status: 'error', message: 'Error fetching users' });
+            }
+
+            // Parse secret_keys dari string menjadi array
+            const formattedUsers = (users || []).map(user => ({
+                user_id: user.user_id,
+                username: user.username,
+                email: user.email,
+                secret_keys: user.secret_keys ? user.secret_keys.split(',') : []
+            }));
+
+            res.json({
+                status: 'success',
+                users: formattedUsers,
+                total: total,
+                page: page,
+                limit: limit,
+                totalPages: totalPages
+            });
+        });
+    });
+});
+
+// 3. Get WebSocket Logs
+app.get('/api/admin/ws-logs', autentikasiAdmin, (req, res) => {
+    // Return cleaned logs (strip legacy timing keys)
+    const cleanedLogs = wsLogs.map(entry => {
+        const cleanedData = JSON.parse(JSON.stringify(entry.data || {}));
+        if (Object.prototype.hasOwnProperty.call(cleanedData, 'response_time_ms')) delete cleanedData.response_time_ms;
+        if (Object.prototype.hasOwnProperty.call(cleanedData, 'processing_ms')) delete cleanedData.processing_ms;
+        return {
+            type: entry.type,
+            data: cleanedData,
+            timestamp: entry.timestamp
+        };
+    });
+    res.json({
+        status: 'success',
+        logs: cleanedLogs,
+        total: cleanedLogs.length
+    });
+});
+
+// 4. Clear WebSocket Logs
+app.delete('/api/admin/ws-logs', autentikasiAdmin, (req, res) => {
+    wsLogs.length = 0; // Clear array
+    res.json({ status: 'success', message: 'Logs cleared' });
+});
 
 // --- JALANKAN SERVER ---
 // server sudah wrap app dengan http.createServer(app), jadi cukup server.listen() saja

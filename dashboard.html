@@ -484,7 +484,22 @@
                         
                         // Trigger refresh untuk semua widget dari data baru ini
                         refreshWidgetData();
-                        
+
+                        // Laporkan latency ke server jika original timestamp disertakan
+                        if (data.original_timestamp_ms) {
+                            try {
+                                const clientReceiveMs = Date.now();
+                                const latencyReport = {
+                                    action: 'latency_report',
+                                    device: data.device,
+                                    var: data.var,
+                                    original_timestamp_ms: data.original_timestamp_ms,
+                                    client_receive_ms: clientReceiveMs
+                                };
+                                if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(latencyReport));
+                            } catch (e) { console.warn('Failed to send latency report', e); }
+                        }
+
                         return;
                     }
                 } catch (error) {
@@ -695,7 +710,7 @@
 
             // --- LOGIKA KONTEN WIDGET BERDASARKAN TIPE ---
 
-            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+            if (widget.widget_type === 'graph' || widget.widget_type === 'chart' || widget.widget_type === 'gauge') {
                 // --- GRAPH & GAUGE ---
                 const canvas = document.createElement('canvas');
                 canvasId = `canvas-${widget.widget_id}`;
@@ -770,11 +785,11 @@
                 d.sensor_type === widget.sensor_type
             ) : [];
 
-            if (widget.widget_type === 'graph' || widget.widget_type === 'gauge') {
+            if (widget.widget_type === 'graph' || widget.widget_type === 'chart' || widget.widget_type === 'gauge') {
                 // Gunakan setTimeout agar elemen canvas dirender dulu oleh browser
                 setTimeout(() => {
                     try {
-                        if (widget.widget_type === 'graph') {
+                        if (widget.widget_type === 'graph' || widget.widget_type === 'chart') {
                             drawGraph(canvasId, widgetData);
                         } else if (widget.widget_type === 'gauge') {
                             drawGauge(canvasId, widgetData, widget.data_type);
@@ -854,7 +869,7 @@
             if (!widgetToUpdate) return;
 
             // Update untuk tipe 'graph'
-            if (widgetToUpdate.widget_type === 'graph') {
+            if (widgetToUpdate.widget_type === 'graph' || widgetToUpdate.widget_type === 'chart') {
                 const canvasId = `canvas-${widgetToUpdate.widget_id}`;
                 const chart = Chart.getChart(canvasId);
                 if (!chart) return; // Chart belum ada atau sudah dihancurkan

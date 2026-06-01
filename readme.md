@@ -4,33 +4,60 @@ Dokumen ini ditujukan untuk operator: mulai dari install Node.js sampai aplikasi
 
 ## 1. Ringkasan
 
-- Backend: Node.js + Express + Socket.IO
-- Database: SQLite (file `database.sqlite`, otomatis dibuat/dipakai aplikasi)
+- Backend: Node.js + Express + WebSocket
+- Database: **MySQL 8.0** (containerized via Docker, otomatis diinisialisasi)
+  - Fallback ke SQLite jika Docker tidak tersedia
 - Frontend: file HTML statis yang disajikan langsung oleh server Node.js
 
-Tidak perlu setup MySQL.
+**Keuntungan MySQL:**
+- Scalable untuk jutaan sensor records
+- Production-ready dengan backup built-in
+- Compatible dengan berbagai tools monitoring
 
 ## 2. Prasyarat
 
+### Wajib:
 - Node.js LTS (disarankan versi 18 ke atas)
 - NPM (biasanya sudah ikut dengan Node.js)
-- Git (opsional, jika ambil source dari repository)
-- Windows: disarankan bisa buka PowerShell as Administrator (untuk auto-rule firewall)
+- Docker & Docker Compose (untuk MySQL containerized)
+  - Windows/Mac: Install Docker Desktop
+  - Linux: `sudo apt install docker.io docker-compose`
 
-## 3. Install Node.js
+### Opsional:
+- Git (jika ambil source dari repository)
+- Windows: PowerShell as Administrator (untuk auto-rule firewall)
+
+## 3. Install Docker
+
+### Windows/Mac
+Download dan install Docker Desktop dari: https://www.docker.com/products/docker-desktop
+
+Cek instalasi:
+```powershell
+docker --version
+docker-compose --version
+```
+
+### Ubuntu/Lubuntu
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose
+docker --version
+docker-compose --version
+```
+
+## 4. Install Node.js
 
 ### Windows
-
-1. Install Node.js LTS dari situs resmi.
-2. Cek berhasil atau belum:
-
+1. Download Node.js LTS dari https://nodejs.org
+2. Run installer dengan Next > Next > Finish
+3. Cek di PowerShell:
 ```powershell
 node -v
 npm -v
 ```
 
 ### Ubuntu/Lubuntu
-
 ```bash
 sudo apt update
 sudo apt install -y nodejs npm git
@@ -38,13 +65,13 @@ node -v
 npm -v
 ```
 
-## 4. Ambil Kode dan Install Dependency
+## 5. Ambil Kode dan Install Dependency
 
 Jika dari git:
 
 ```bash
 git clone <URL_REPOSITORY_KAMU>
-cd skripsi
+cd uniot
 npm install
 ```
 
@@ -54,7 +81,28 @@ Jika project sudah ada di folder lokal, cukup masuk ke folder project lalu:
 npm install
 ```
 
-## 5. Jalankan Aplikasi
+## 6. Jalankan Aplikasi
+
+### Cara Tercepat (Recommended)
+
+**Windows:**
+```powershell
+.\start.bat
+```
+
+**Linux/Mac:**
+```bash
+./start.sh
+```
+
+Script otomatis akan:
+1. ✓ Cek Docker installed
+2. ✓ Start MySQL container via docker-compose
+3. ✓ Wait MySQL ready (polling 60 detik)
+4. ✓ npm install dependencies
+5. ✓ npm start aplikasi
+
+### Manual (jika script gagal)
 
 ```bash
 npm start
@@ -65,19 +113,23 @@ Saat startup, sistem otomatis:
 1. Generate atau update file `.env`
 2. Mengisi `LOCAL_IP` sesuai interface jaringan aktif
 3. Mengisi `PORT` (default `3001`)
-4. Mencoba membuat rule firewall Windows untuk port aplikasi
-5. Menjalankan server Node.js
+4. Mengisi MySQL credentials dari environment variables
+5. Connect ke MySQL container
 
 Contoh log sukses:
 
 ```text
-.env diperbarui. LOCAL_IP=192.168.x.x, PORT=3001
-Server (Express + Socket.IO) berjalan di http://localhost:3001
-Akses dari jaringan lokal: http://192.168.x.x:3001
-Successfully connected to database.sqlite!
+.env diperbarui:
+  LOCAL_IP=192.168.x.x
+  PORT=3001
+  DB_TYPE=mysql
+✓ Successfully connected to MySQL!
+  Host: localhost:3306
+  Database: uniot_db
+Server berjalan di http://localhost:3001
 ```
 
-## 6. Cara Akses
+## 7. Cara Akses
 
 ### Dari server itu sendiri
 
@@ -97,29 +149,33 @@ Contoh:
 http://192.168.18.244:3001/login.html
 ```
 
-## 7. Tentang File .env
+## 8. Tentang File .env
 
-File `.env` dikelola otomatis saat `npm start`.
+File `.env` dikelola otomatis saat startup.
 Isi minimal:
 
 ```env
 LOCAL_IP=192.168.x.x
 PORT=3001
+DB_TYPE=mysql
+DB_HOST=localhost
+DB_USER=uniot_user
+DB_PASSWORD=uniot_pass
+DB_NAME=uniot_db
 ```
 
-Kamu boleh ubah `PORT`, tetapi pastikan akses URL mengikuti port tersebut.
+Lihat `.env.example` untuk dokumentasi lengkap.
 
-## 8. Troubleshooting Operator
+## 9. Troubleshooting Operator
 
-### A. Error EADDRINUSE: port already in use
+### A. Error "Docker not found"
 
-Artinya port 3001 dipakai proses lain.
+**Solusi:**
+- Pastikan Docker Desktop sudah installed (Windows/Mac)
+- Pastikan Docker daemon sedang berjalan
+- Ubuntu: Cek dengan `docker ps`
 
-Windows (PowerShell):
-
-```powershell
-Get-NetTCPConnection -LocalPort 3001 -State Listen
-```
+### B. Error "port 3001 already in use"
 
 Lalu hentikan proses yang memakai port itu, atau ganti `PORT` di `.env`.
 
