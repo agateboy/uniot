@@ -1353,14 +1353,14 @@ wss.on('connection', (ws, req) => {
     
     console.log(`[ Device] Menunggu - Menunggu autentikasi...`);
     
-    // === TIMEOUT: 20 detik untuk mengirim auth message ===
+    // === TIMEOUT: 360 detik untuk mengirim auth message ===
     authTimeout = setTimeout(() => {
         if (allConnections.has(connClientKey) && authStatus === 'pending') {
             console.log(`[✗ Device]   Timeout autentikasi (tidak ada pesan yang diterima)`);
             ws.close(1008, 'Autentikasi timeout - kirim {"action":"auth","key":"..."} untuk authenticate');
             allConnections.delete(connClientKey);
         }
-    }, 20000);
+    }, 360000);
 });
 
 // --- Helper: Broadcast ke dashboard pengguna ---
