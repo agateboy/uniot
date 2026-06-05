@@ -881,10 +881,19 @@ wss.on('connection', (ws, req) => {
                         
                         // Kirim konfirmasi
                         ws.send(JSON.stringify({ 
+                            type: 'handshake',
                             status: 'success', 
                             message: `Terauthentikasi sebagai "${deviceName}"`,
                             device_id: deviceId
                         }));
+
+                        broadcastToUserDashboards(userId, {
+                            type: 'devicePresence',
+                            status: 'connected',
+                            device_id: deviceId,
+                            device_name: deviceName,
+                            timestamp: new Date().toISOString()
+                        });
 
                         logProcessed('processed', {
                             from: clientType,
@@ -1220,6 +1229,16 @@ wss.on('connection', (ws, req) => {
         if (authTimeout) clearTimeout(authTimeout);
         
         if (connClientKey) {
+            if (clientType === 'device' && userId && deviceId) {
+                broadcastToUserDashboards(userId, {
+                    type: 'devicePresence',
+                    status: 'disconnected',
+                    device_id: deviceId,
+                    device_name: deviceName,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
             allConnections.delete(connClientKey);
             
             if (clientType === 'device') {
@@ -1253,6 +1272,15 @@ wss.on('connection', (ws, req) => {
             
             allConnections.set(connClientKey, { type: 'dashboard', ws, userId, username: user.username });
             console.log(`[✓ Dashboard] Terauthentikasi - User: ${user.username} (ID: ${userId})`);
+
+            ws.send(JSON.stringify({
+                type: 'handshake',
+                status: 'success',
+                message: `Terauthentikasi sebagai "${user.username}"`,
+                user_id: userId
+            }));
+
+            sendDevicePresenceSnapshot(userId, ws);
             
             // Batalkan timeout jika ada
             if (authTimeout) clearTimeout(authTimeout);
@@ -1292,10 +1320,19 @@ wss.on('connection', (ws, req) => {
         
         // Kirim konfirmasi ke device
         ws.send(JSON.stringify({
+            type: 'handshake',
             status: 'success',
             message: `Terauthentikasi sebagai "${deviceName}"`,
             device_id: deviceId
         }));
+
+        broadcastToUserDashboards(userId, {
+            type: 'devicePresence',
+            status: 'connected',
+            device_id: deviceId,
+            device_name: deviceName,
+            timestamp: new Date().toISOString()
+        });
         return;
     }
     
@@ -1351,6 +1388,27 @@ function broadcastToUserDashboards(userId, data) {
     } else {
         console.log(`[Broadcast] ✓ Data dikirim ke ${broadcastCount} dashboard`);
     }
+}
+
+function sendDevicePresenceSnapshot(userId, ws) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    allConnections.forEach((conn) => {
+        if (
+            conn.type === 'device' &&
+            conn.userId === userId &&
+            conn.authStatus === 'authenticated' &&
+            conn.ws && conn.ws.readyState === WebSocket.OPEN
+        ) {
+            ws.send(JSON.stringify({
+                type: 'devicePresence',
+                status: 'connected',
+                device_id: conn.deviceId,
+                device_name: conn.deviceName,
+                timestamp: new Date().toISOString()
+            }));
+        }
+    });
 }
 
 // --- BROADCAST KE SEMUA DEVICES (untuk sinkronisasi data antar device) ---
@@ -1557,6 +1615,16 @@ app.get('/api/public/updates/:slug', (req, res) => {
             publicViewClients.get(slug).delete(res);
         });
     });
+                if (clientType === 'device' && userId && deviceId) {
+                    broadcastToUserDashboards(userId, {
+                        type: 'devicePresence',
+                        status: 'disconnected',
+                        device_id: deviceId,
+                        device_name: deviceName,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+
 });
 
 // --- FUNGSI BROADCAST UPDATE KE PUBLIC VIEW CLIENTS ---

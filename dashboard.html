@@ -107,6 +107,91 @@
             box-sizing: border-box;
         }
 
+        .ws-monitor-panel {
+            background: #0f172a;
+            color: #e2e8f0;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-top: 16px;
+        }
+
+        .ws-monitor-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .ws-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.07);
+            font-size: 0.92em;
+        }
+
+        .ws-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .ws-status-dot.connected {
+            background: #22c55e;
+        }
+
+        .ws-status-dot.disconnected {
+            background: #ef4444;
+        }
+
+        .ws-status-dot.reconnecting,
+        .ws-status-dot.connecting {
+            background: #f59e0b;
+        }
+
+        .ws-monitor-meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            font-size: 0.92em;
+            color: #cbd5e1;
+        }
+
+        .ws-log-panel {
+            max-height: 180px;
+            overflow-y: auto;
+            padding: 10px;
+            border-radius: 6px;
+            background: #020617;
+            border: 1px solid #1e293b;
+            font-family: Consolas, Monaco, monospace;
+            font-size: 0.82em;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .ws-log-entry {
+            margin-bottom: 6px;
+        }
+
+        .ws-log-tag {
+            font-weight: 700;
+            margin-right: 6px;
+        }
+
+        .ws-log-tag.tx { color: #93c5fd; }
+        .ws-log-tag.rx { color: #86efac; }
+        .ws-log-tag.info { color: #fcd34d; }
+        .ws-log-tag.error { color: #fca5a5; }
+
         #dashboard-controls label {
             font-weight: 600;
             margin-right: 10px;
@@ -408,10 +493,28 @@
                 <button type="submit">Simpan Widget</button>
             </form>
         </div>
+
     </div>
 
     <div id="dashboard-container">
         <p>Memuat data perangkat...</p>
+    </div>
+
+    <div class="ws-monitor-panel">
+        <div class="ws-monitor-header">
+            <div>Data Monitor / Log Console</div>
+            <div class="ws-status-pill">
+                <span id="wsStatusDot" class="ws-status-dot connecting"></span>
+                <span id="wsStatusText">Connecting</span>
+            </div>
+        </div>
+        <div class="ws-monitor-meta">
+            <span>Latency: <strong id="wsLatencyText">-</strong></span>
+            <span>Raw JSON WebSocket masuk dan keluar tampil di sini.</span>
+        </div>
+        <div id="wsLogPanel" class="ws-log-panel">
+            <div class="ws-log-entry"><span class="ws-log-tag info">INFO</span>Menunggu data WebSocket...</div>
+        </div>
     </div>
 
     <script>
@@ -438,8 +541,89 @@
 
         // --- Koneksi WebSocket Native ---
         let ws = null;
+        let wsReconnectTimer = null;
+        let latestWsLatencyMs = null;
+
+        const wsStatusDot = document.getElementById('wsStatusDot');
+        const wsStatusText = document.getElementById('wsStatusText');
+        const wsLatencyText = document.getElementById('wsLatencyText');
+        const wsLogPanel = document.getElementById('wsLogPanel');
+
+        function formatWsPayload(payload) {
+            if (typeof payload === 'string') return payload;
+            try {
+                return JSON.stringify(payload);
+            } catch (error) {
+                return String(payload);
+            }
+        }
+
+        function appendWsLog(direction, rawText, tone = 'info') {
+            if (!wsLogPanel) return;
+
+            const row = document.createElement('div');
+            row.className = 'ws-log-entry';
+            const timestamp = new Date().toLocaleTimeString();
+            row.innerHTML = `<span class="ws-log-tag ${tone}">${direction}</span>[${timestamp}]`;
+            const payload = document.createElement('span');
+            payload.textContent = ` ${rawText}`;
+            row.appendChild(payload);
+            wsLogPanel.prepend(row);
+
+            while (wsLogPanel.children.length > 40) {
+                wsLogPanel.removeChild(wsLogPanel.lastChild);
+            }
+        }
+
+        function updateWsStatus(state, latencyMs = null) {
+            if (wsStatusDot) {
+                wsStatusDot.className = `ws-status-dot ${state}`;
+            }
+
+            if (wsStatusText) {
+                const labelMap = {
+                    connected: 'Connected',
+                    disconnected: 'Disconnected',
+                    reconnecting: 'Reconnecting',
+                    connecting: 'Connecting'
+                };
+                wsStatusText.textContent = labelMap[state] || state;
+            }
+
+            if (wsLatencyText) {
+                wsLatencyText.textContent = Number.isFinite(latencyMs) ? `${Math.round(latencyMs)} ms` : '-';
+            }
+        }
+
+        function sendWsPayload(payload) {
+            const rawText = formatWsPayload(payload);
+            appendWsLog('TX', rawText, 'tx');
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(rawText);
+                return true;
+            }
+
+            appendWsLog('ERROR', 'WebSocket tidak terhubung saat mengirim pesan', 'error');
+            return false;
+        }
+
+        function scheduleReconnect() {
+            updateWsStatus('reconnecting', latestWsLatencyMs);
+            if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = setTimeout(() => {
+                wsReconnectTimer = null;
+                connectWebSocket();
+            }, 3000);
+        }
 
         function connectWebSocket() {
+            if (wsReconnectTimer) {
+                clearTimeout(wsReconnectTimer);
+                wsReconnectTimer = null;
+            }
+
+            updateWsStatus('connecting', latestWsLatencyMs);
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}?token=${encodeURIComponent(token)}`;
             
@@ -447,12 +631,37 @@
             
             ws.onopen = () => {
                 console.log('✓ WebSocket terhubung ke server!');
+                updateWsStatus('connecting', latestWsLatencyMs);
+                appendWsLog('INFO', `Socket open, menunggu device online: ${wsUrl}`, 'info');
             };
             
             ws.onmessage = (event) => {
                 try {
+                    appendWsLog('RX', event.data, 'rx');
                     const data = JSON.parse(event.data);
                     console.log('📨 Data dari server:', data);
+
+                    if (data.type === 'handshake' && data.status === 'success') {
+                        appendWsLog('INFO', 'Handshake dashboard berhasil.', 'info');
+                    }
+
+                    if (data.type === 'devicePresence') {
+                        if (data.status === 'connected') {
+                            updateWsStatus('connected', latestWsLatencyMs);
+                            appendWsLog('INFO', `Device online: ${data.device_name || data.device_id}`, 'info');
+                        } else if (data.status === 'disconnected') {
+                            updateWsStatus('disconnected', latestWsLatencyMs);
+                            appendWsLog('ERROR', `Device offline: ${data.device_name || data.device_id}`, 'error');
+                        }
+                    }
+
+                    if (data && data.server_broadcast_ms) {
+                        const latencyMs = Date.now() - Number(data.server_broadcast_ms);
+                        if (Number.isFinite(latencyMs)) {
+                            latestWsLatencyMs = latencyMs;
+                            updateWsStatus(wsStatusText && wsStatusText.textContent === 'Connected' ? 'connected' : 'connecting', latestWsLatencyMs);
+                        }
+                    }
                     
                     // ACK dari server untuk command yang dikirim dashboard
                     if (data.status === 'ack') {
@@ -496,7 +705,7 @@
                                     original_timestamp_ms: data.original_timestamp_ms,
                                     client_receive_ms: clientReceiveMs
                                 };
-                                if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(latencyReport));
+                                sendWsPayload(latencyReport);
                             } catch (e) { console.warn('Failed to send latency report', e); }
                         }
 
@@ -509,12 +718,14 @@
             
             ws.onerror = (error) => {
                 console.error(' WebSocket error:', error);
+                appendWsLog('ERROR', 'WebSocket error', 'error');
             };
             
             ws.onclose = () => {
                 console.log('WebSocket connection closed');
-                // Auto-reconnect dalam 3 detik
-                setTimeout(connectWebSocket, 3000);
+                updateWsStatus('disconnected', latestWsLatencyMs);
+                appendWsLog('ERROR', 'WebSocket terputus', 'error');
+                scheduleReconnect();
             };
         }
 
@@ -1089,8 +1300,7 @@
                         val: newState
                     };
                     
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify(command));
+                    if (sendWsPayload(command)) {
                         widget.current_value = newState;
                     } else {
                         console.error('WebSocket tidak terhubung');
@@ -1119,8 +1329,7 @@
                         val: newValue
                     };
                     
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify(command));
+                    if (sendWsPayload(command)) {
                         widget.current_value = newValue;
                     } else {
                         console.error('WebSocket tidak terhubung');

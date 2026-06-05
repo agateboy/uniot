@@ -12,6 +12,34 @@
             padding: 10px;
             overflow-x: hidden;
         }
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            padding: 8px 10px;
+            border: 1px solid #0f0;
+            background: #111;
+        }
+        .status-left,
+        .status-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
+        }
+        .status-dot.connected { background: #0f0; }
+        .status-dot.disconnected { background: #f00; }
+        .status-dot.reconnecting,
+        .status-dot.connecting { background: #ff0; }
         #log { 
             height: 300px; 
             overflow-y: auto; 
@@ -29,14 +57,125 @@
 </head>
 <body>
     <b>Websocket Serial Log (v2.0)</b><br>
+    <div class="status-bar">
+        <div class="status-left">
+            <span id="wsStatusDot" class="status-dot disconnected"></span>
+            <span id="wsStatusText">Disconnected</span>
+        </div>
+        <div class="status-right">
+            <span>Latency: <span id="wsLatencyText">-</span></span>
+        </div>
+    </div>
     <div id="log"></div>
 
     <script>
         var ws;
         var logDiv = document.getElementById("log");
+        var wsStatusDot = document.getElementById("wsStatusDot");
+        var wsStatusText = document.getElementById("wsStatusText");
+        var wsLatencyText = document.getElementById("wsLatencyText");
         var messageQueue = [];
         var connectionStatus = "IDLE";
         var authenticatedDeviceId = null;
+        var reconnectTimer = null;
+        var currentWsUrl = null;
+        var latestWsLatencyMs = null;
+
+        function updateConnectionUI(status, latencyMs) {
+            connectionStatus = status;
+            if (wsStatusDot) {
+                wsStatusDot.className = 'status-dot ' + status.toLowerCase();
+            }
+            if (wsStatusText) {
+                var labelMap = {
+                    CONNECTED: 'Connected',
+                    DISCONNECTED: 'Disconnected',
+                    RECONNECTING: 'Reconnecting',
+                    CONNECTING: 'Connecting'
+                };
+                wsStatusText.textContent = labelMap[status] || status;
+            }
+            if (typeof latencyMs === 'number' && !isNaN(latencyMs)) {
+                latestWsLatencyMs = Math.round(latencyMs);
+            }
+            if (wsLatencyText) {
+                wsLatencyText.textContent = latestWsLatencyMs !== null ? latestWsLatencyMs + ' ms' : '-';
+            }
+        }
+
+        function logWire(direction, payload, tipe) {
+            printLog(direction + ' RAW: ' + payload, tipe || 'info');
+        }
+
+        function sendWsPayload(payload) {
+            var rawText = typeof payload === 'string' ? payload : JSON.stringify(payload);
+            logWire('--> TX', rawText, 'warn');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(rawText);
+                return true;
+            }
+            printLog('WebSocket belum terhubung saat mengirim', 'error');
+            return false;
+        }
+
+        function openWebSocket(url, isReconnect) {
+            currentWsUrl = url;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            updateConnectionUI(isReconnect ? 'RECONNECTING' : 'CONNECTING', latestWsLatencyMs);
+            printLog((isReconnect ? 'Reconnecting to: ' : 'Connecting to: ') + url, 'info');
+            ws = new WebSocket(url);
+
+            ws.onopen = function() {
+                updateConnectionUI('CONNECTING', latestWsLatencyMs);
+                printLog('[OK] WS TERBUKA, menunggu handshake!', 'success');
+                sendToApp('STATUS:CONNECTING');
+            };
+
+            ws.onclose = function() {
+                updateConnectionUI('DISCONNECTED', latestWsLatencyMs);
+                authenticatedDeviceId = null;
+                printLog('[!] WS TERPUTUS', 'error');
+                sendToApp('STATUS:DISCONNECTED');
+
+                if (currentWsUrl) {
+                    updateConnectionUI('RECONNECTING', latestWsLatencyMs);
+                    reconnectTimer = setTimeout(function() {
+                        openWebSocket(currentWsUrl, true);
+                    }, 3000);
+                }
+            };
+
+            ws.onerror = function(error) {
+                printLog('[ERROR] WS Error: ' + (error && error.message ? error.message : 'connection error'), 'error');
+                sendToApp('ERROR:CONNECTION_FAILED');
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    var rawData = event.data;
+                    logWire('<-- RX', rawData.substring(0, 200), 'info');
+                    var json = JSON.parse(rawData);
+                    if (json && json.type === 'handshake' && json.status === 'success') {
+                        updateConnectionUI('CONNECTED', latestWsLatencyMs);
+                        printLog('[OK] Handshake berhasil - WS TERHUBUNG!', 'success');
+                        sendToApp('STATUS:CONNECTED');
+                    }
+                    if (json && json.server_broadcast_ms) {
+                        var latencyMs = Date.now() - Number(json.server_broadcast_ms);
+                        if (Number.isFinite(latencyMs)) {
+                            updateConnectionUI(connectionStatus === 'CONNECTED' ? 'CONNECTED' : 'CONNECTING', latencyMs);
+                        }
+                    }
+                    handleServerMessage({ data: rawData });
+                } catch (e) {
+                    handleServerMessage(event);
+                }
+            };
+        }
         
         // Fungsi untuk mencetak tulisan ke layar HP dengan timestamp
         function printLog(pesan, tipe = 'normal') { 
@@ -72,7 +211,6 @@
         function handleServerMessage(event) {
             try {
                 var rawData = event.data;
-                printLog("<-- RX: " + rawData.substring(0, 100), 'info');
                 
                 // Parse JSON dari server
                 var json = JSON.parse(rawData);
@@ -122,36 +260,7 @@
                     if (perintah.startsWith("CONNECT:")) {
                         printLog("CMD: CONNECTING...", 'warn');
                         var url = perintah.substring(8);
-                        
-                        // Close existing connection
-                        if(ws && ws.readyState !== WebSocket.CLOSED) {
-                            ws.close();
-                        }
-                        
-                        printLog("Connecting to: " + url, 'info');
-                        ws = new WebSocket(url);
-                        connectionStatus = "CONNECTING";
-                        
-                        ws.onopen = function() { 
-                            connectionStatus = "CONNECTED";
-                            printLog("[OK] WS TERHUBUNG!", 'success'); 
-                            sendToApp("STATUS:CONNECTED");
-                        };
-                        
-                        ws.onclose = function() { 
-                            connectionStatus = "DISCONNECTED";
-                            authenticatedDeviceId = null;
-                            printLog("[!] WS TERPUTUS", 'error'); 
-                            sendToApp("STATUS:DISCONNECTED");
-                        };
-                        
-                        ws.onerror = function(error) {
-                            printLog("[ERROR] WS Error: " + error.message, 'error');
-                            sendToApp("ERROR:CONNECTION_FAILED");
-                        };
-                        
-                        // HANDLER PALING PENTING - terima pesan dari server
-                        ws.onmessage = handleServerMessage;
+                        openWebSocket(url, false);
                         
                         window.AppInventor.setWebViewString("");
                     } 
@@ -179,12 +288,9 @@
                             // Jika bukan JSON valid, kirim payload asli.
                         }
                         
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            printLog("Sending: " + payloadToSend.substring(0, 50), 'info');
-                            ws.send(payloadToSend);
+                        if (sendWsPayload(payloadToSend)) {
                             sendToApp("SENT:OK");
                         } else {
-                            printLog("WS not connected!", 'error');
                             sendToApp("SENT:FAILED");
                         }
                         
@@ -210,6 +316,7 @@
         }, 100);
 
         // Initial log
+        updateConnectionUI('DISCONNECTED', null);
         printLog("WebSocket Client Ready!", 'success');
         printLog("Commands: CONNECT:<url>, SEND:<json>, STATUS:, CLEAR", 'info');
     </script>
