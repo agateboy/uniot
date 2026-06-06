@@ -179,6 +179,58 @@
             color: #4b4f56;
         }
 
+        .about-team {
+            margin-top: 2rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1.25rem;
+        }
+
+        .profile-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            border: 1px solid #e6e8ec;
+            border-radius: 14px;
+            background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+        }
+
+        .profile-photo {
+            width: 96px;
+            height: 96px;
+            border-radius: 18px;
+            object-fit: cover;
+            flex-shrink: 0;
+            border: 3px solid #ffffff;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+            background-color: #eef2f7;
+        }
+
+        .profile-info h2 {
+            margin: 0 0 0.35rem 0;
+            font-size: 1.15rem;
+            color: #1c1e21;
+        }
+
+        .profile-info p {
+            margin: 0.15rem 0;
+            font-size: 0.98rem;
+            line-height: 1.5;
+            color: #4b4f56;
+        }
+
+        .profile-label {
+            display: inline-block;
+            margin-bottom: 0.5rem;
+            font-size: 0.84rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #007bff;
+        }
+
         @media (max-width: 900px) {
             .app-header {
                 padding: 0.9rem 1.2rem;
@@ -253,6 +305,19 @@
             .main-content p {
                 font-size: 1rem;
             }
+
+            .about-team {
+                grid-template-columns: 1fr;
+            }
+
+            .profile-card {
+                align-items: flex-start;
+            }
+
+            .profile-photo {
+                width: 84px;
+                height: 84px;
+            }
         }
         
     </style>
@@ -288,10 +353,30 @@
     </header>
 
     <main class="main-content">
-        <h1>Tentang Saya</h1>
+        <h1>Tentang UNIOT </h1>
         <p>
-            Platform ini dibangun sebagai bagian dari proyek Skripsi di UNY untuk menyediakan solusi monitoring dan kontrol perangkat IoT yang fleksibel dan real-time. Tujuannya adalah untuk memudahkan pengguna dalam mengelola berbagai sensor dan aktuator dari mana saja melalui dashboard web yang interaktif.
+            Platform ini dibangun sebagai bagian dari proyek tugas akhir skripsi "Pengembangan Media Pembelajaran Internet of Things UNIOT Berbasis Javascript dengan Teknologi WebSocket dan MySQL Program Studi Pendidikan Teknik Mekatronika".
         </p>
+        <section class="about-team" aria-label="Tim pengembang UNIOT">
+            <article class="profile-card">
+                <img class="profile-photo" src="photo/adrian.jpg" alt="Adrian Ramdhany">
+                <div class="profile-info">
+                    <span class="profile-label">Dikembangkan oleh</span>
+                    <h2>Adrian Ramdhany</h2>
+                    <p>NIM. 22518241019</p>
+                    <p>Pendidikan Teknik Mekatronika</p>
+                </div>
+            </article>
+
+            <article class="profile-card">
+                <img class="profile-photo" src="photo/amelia_fauziah.jpg" alt="Amelia Fauziah Husna S.Pd., M.Pd.">
+                <div class="profile-info">
+                    <span class="profile-label">Dosen Pembimbing</span>
+                    <h2>Amelia Fauziah Husna S.Pd., M.Pd.</h2>
+                    <p>NIP. 19910301 201903 2 016</p>
+                </div>
+            </article>
+        </section>
     </main>
 
 </body>
