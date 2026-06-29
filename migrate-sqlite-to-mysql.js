@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 /**
- * SQLite to MySQL Migration Script
  * Migrate data dari database.sqlite ke MySQL container
  */
 

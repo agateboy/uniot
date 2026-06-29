@@ -7,16 +7,13 @@
     <title>Login - Dashboard UNIOT</title>
     <link rel="stylesheet" href="styles/global.css">
     <style>
-        /* Mengambil style dasar dari login.html untuk konsistensi */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #f0f2f5;
             margin: 0;
             padding: 0;
-            /* display: grid; dkk. DIHAPUS dari sini agar header bisa tampil */
         }
 
-        /* --- Style untuk Header --- */
         .app-header {
             background-color: #ffffff;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -111,38 +108,33 @@
             background-color: #e9ecef;
         }
 
-        /* --- CSS BARU UNTUK NAVIGASI --- */
         
-        /* Style Default (Tidak Aktif) */
         .main-nav a {
             text-decoration: none;
-            color: #007bff; /* Biru */
+            color: #007bff;
             font-weight: 600;
             font-size: 1rem;
-            padding: 0.5rem 1rem; /* Padding disamakan */
-            border-radius: 6px; /* Radius disamakan */
-            transition: all 0.2s ease; /* Transisi untuk semua properti */
+            padding: 0.5rem 1rem; 
+            border-radius: 6px;
+            transition: all 0.2s ease; 
         }
 
-        /* Hover untuk link TIDAK AKTIF */
         .main-nav a:hover {
             text-decoration: none;
             color: #0056b3;
-            background-color: #f0f2f5; /* Latar abu-abu sangat muda */
+            background-color: #f0f2f5;
         }
         
-        /* Style untuk link AKTIF (biru) */
         .main-nav a.active-nav {
             background-color: #007bff;
             color: white;
         }
         
         .main-nav a.active-nav:hover {
-            background-color: #0069d9; /* Biru lebih gelap */
+            background-color: #0069d9; 
             color: white;
         }
 
-        /* Style untuk tombol Register (hijau, SELALU override) */
         .main-nav a.btn-register-nav {
             background-color: #42b72a; 
             color: white;
@@ -153,7 +145,6 @@
             text-decoration: none;
             color: white;
         }
-        /* --- AKHIR CSS BARU --- */
 
 
         .login-container {
@@ -164,7 +155,7 @@
             width: 100%;
             max-width: 400px;
             box-sizing: border-box;
-            margin: 3rem auto; /* DITAMBAHKAN: untuk memberi jarak dari header dan center */
+            margin: 3rem auto; 
             margin-bottom: 2rem;
         }
 

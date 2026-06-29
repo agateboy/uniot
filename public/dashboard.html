@@ -249,7 +249,6 @@
             align-items: start;
         }
 
-        /* --- Style Widget --- */
         .widget {
             position: relative;
             background: white;
@@ -270,12 +269,10 @@
             min-height: 350px;
         }
 
-        /* Lebar widget graph */
         .widget.gauge {
             min-height: 300px;
         }
 
-        /* Lebar widget gauge */
         .widget.toggle {
             min-height: 150px;
             display: flex;
@@ -343,9 +340,7 @@
             justify-content: center;
             flex-grow: 1;
             width: 100%;
-            /* Paksa lebar penuh */
             box-sizing: border-box;
-            /* Agar padding dihitung dalam lebar */
         }
 
         .switch {
@@ -393,9 +388,6 @@
             transform: translateX(26px);
         }
 
-        /* ------------------------------------ */
-
-        /* Responsif sederhana */
         @media (max-width: 768px) {
 
             .widget.graph,
@@ -414,7 +406,6 @@
             }
         }
 
-        /* Grid-friendly widget sizing */
         .widget {
             width: 100%;
         }
